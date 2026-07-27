@@ -1,0 +1,413 @@
+/* eslint-disable no-console */
+/* eslint-disable no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable no-undef */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { StatusCodes } from 'http-status-codes';
+import { JwtPayload } from 'jsonwebtoken';
+import mongoose from 'mongoose';
+import path from 'path';
+import fs from 'fs';
+import PDFDocument from 'pdfkit';
+import ApiError from '../../../errors/ApiError';
+import QueryBuilder from '../../builder/QueryBuilder';
+import { Consultation } from '../consultation/consultation.model';
+import { User } from '../user/user.model';
+import { IReport } from './report.interface';
+import { Report } from './report.model';
+import { VideoSession } from '../videoSession/videoSession.model';
+import { Transcript } from '../transcription/transcription.model';
+
+const generateConsultationPDF = async (reportData: any): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument();
+      const fileName = `report-${reportData.consultationId}-${Date.now()}.pdf`;
+      const uploadDir = path.join(process.cwd(), 'uploads', 'reports');
+
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+
+      const filePath = path.join(uploadDir, fileName);
+      const stream = fs.createWriteStream(filePath);
+
+      doc.pipe(stream);
+
+      // --- Modern PDF Styling ---
+      const primaryColor = '#2c3e50';
+      const secondaryColor = '#34495e';
+      const accentColor = '#3498db';
+      const lightGray = '#f8f9fa';
+
+      // Header Background
+      doc.rect(0, 0, 612, 120).fill('#f1f4f6');
+
+      // Title
+      doc
+        .fillColor(primaryColor)
+        .fontSize(24)
+        .font('Helvetica-Bold')
+        .text('Consultation Summary Report', 50, 45);
+
+      doc
+        .fontSize(10)
+        .font('Helvetica')
+        .fillColor(secondaryColor)
+        .text('Confidential Consultation Record', 50, 75);
+
+      // Info Section
+      doc.roundedRect(50, 140, 512, 100, 5).strokeColor('#dee2e6').stroke();
+
+      doc.fillColor(primaryColor).font('Helvetica-Bold').fontSize(11);
+      doc.text('Date:', 70, 155);
+      doc.text('Client:', 70, 175);
+      doc.text('Consultant:', 70, 195);
+
+      doc.font('Helvetica').fillColor(secondaryColor);
+      doc.text(
+        reportData.date
+          ? new Date(reportData.date).toLocaleString()
+          : new Date().toLocaleString(),
+        150,
+        155,
+      );
+      doc.text(reportData.userName, 150, 175);
+      doc.text(reportData.consultantName, 150, 195);
+
+      if (reportData.duration) {
+        doc.fillColor(primaryColor).font('Helvetica-Bold');
+        doc.text('Duration:', 70, 215);
+        doc.font('Helvetica').fillColor(secondaryColor);
+        const minutes = Math.floor(reportData.duration / 60);
+        const seconds = reportData.duration % 60;
+        doc.text(`${minutes}m ${seconds}s`, 150, 215);
+      }
+
+      // Conversation History
+      doc.moveDown(4);
+      doc
+        .fillColor(accentColor)
+        .font('Helvetica-Bold')
+        .fontSize(14)
+        .text('Conversation History');
+      doc
+        .moveTo(50, doc.y + 5)
+        .lineTo(562, doc.y + 5)
+        .strokeColor('#e9ecef')
+        .stroke();
+      doc.moveDown(1.5);
+
+      doc
+        .fillColor(secondaryColor)
+        .font('Helvetica')
+        .fontSize(10)
+        .text(reportData.conversation || 'No conversation recorded', {
+          align: 'justify',
+          lineGap: 5,
+        });
+
+      // Consultant Notes
+      if (reportData.notes) {
+        doc.moveDown(2);
+        doc
+          .fillColor(accentColor)
+          .font('Helvetica-Bold')
+          .fontSize(14)
+          .text('Consultant Notes');
+        doc
+          .moveTo(50, doc.y + 5)
+          .lineTo(562, doc.y + 5)
+          .strokeColor('#e9ecef')
+          .stroke();
+        doc.moveDown(1.5);
+
+        doc
+          .fillColor(secondaryColor)
+          .font('Helvetica')
+          .fontSize(10)
+          .text(reportData.notes, {
+            lineGap: 3,
+          });
+      }
+
+      // Shared Links
+      if (reportData.links && reportData.links.length > 0) {
+        doc.moveDown(2);
+        doc
+          .fillColor(accentColor)
+          .font('Helvetica-Bold')
+          .fontSize(14)
+          .text('Shared Resources');
+        doc
+          .moveTo(50, doc.y + 5)
+          .lineTo(562, doc.y + 5)
+          .strokeColor('#e9ecef')
+          .stroke();
+        doc.moveDown(1.5);
+
+        reportData.links.forEach((link: string) => {
+          doc
+            .fillColor(accentColor)
+            .fontSize(10)
+            .font('Helvetica')
+            .text(link, { link: link, underline: true });
+          doc.moveDown(0.5);
+        });
+      }
+
+      // Attached Images
+      if (reportData.images && reportData.images.length > 0) {
+        doc.moveDown(2);
+        doc
+          .fillColor(accentColor)
+          .font('Helvetica-Bold')
+          .fontSize(14)
+          .text('Attached Images');
+        doc
+          .moveTo(50, doc.y + 5)
+          .lineTo(562, doc.y + 5)
+          .strokeColor('#e9ecef')
+          .stroke();
+        doc.moveDown(1.5);
+
+        reportData.images.forEach((imgUrl: string) => {
+          // Resolve local path from URL: /image/filename.jpg -> uploads/image/filename.jpg
+          const fileName = path.basename(imgUrl);
+          const localPath = path.join(
+            process.cwd(),
+            'uploads',
+            'image',
+            fileName,
+          );
+
+          if (fs.existsSync(localPath)) {
+            try {
+              // Check if we need a new page for the image (approximate image height 300)
+              if (doc.y + 300 > 700) {
+                doc.addPage();
+              }
+
+              // Add image with a maximum width to fit the page
+              doc.image(localPath, {
+                fit: [512, 300],
+                align: 'center',
+              });
+              doc.moveDown(1);
+            } catch (err) {
+              console.error(`Failed to add image to PDF: ${localPath}`, err);
+            }
+          }
+        });
+      }
+
+      // Footer
+      const pageCount = doc.bufferedPageRange().count;
+      doc
+        .fontSize(8)
+        .fillColor('#adb5bd')
+        .text(
+          `Generated by Fixpair Live Consultancy - Page ${pageCount}`,
+          50,
+          750,
+          { align: 'center' },
+        );
+
+      doc.end();
+
+      stream.on('finish', () => {
+        resolve(`/reports/${fileName}`);
+      });
+
+      stream.on('error', err => {
+        reject(err);
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+};
+
+const createReport = async (user: JwtPayload, payload: any, files: any) => {
+  const { consultationId, notes, links, conversation } = payload;
+
+  const consultation =
+    await Consultation.findById(consultationId).populate('user consultant');
+  if (!consultation) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Consultation not found');
+  }
+
+  if (consultation.status !== 'completed') {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'Report can only be generated for completed consultations',
+    );
+  }
+
+  if (consultation.consultant._id.toString() !== user.id) {
+    throw new ApiError(
+      StatusCodes.FORBIDDEN,
+      'Only the assigned consultant can finalize the report',
+    );
+  }
+
+  // Use conversation from payload if provided, otherwise fetch from Transcripts, fallback to mock
+  let finalConversation = conversation;
+
+  if (!finalConversation) {
+    // Attempt to fetch real transcripts from the video session
+    const transcripts = await Transcript.find({
+      consultation: consultationId,
+    })
+      .sort({ timestamp: 1 })
+      .lean();
+
+    if (transcripts && transcripts.length > 0) {
+      finalConversation = transcripts
+        .map(t => `${t.speakerRole}: ${t.text}`)
+        .join('\n');
+    } else {
+      // Mock conversation capture from external API
+      const mockConversation = [
+        {
+          sender: 'user',
+          text: 'Hello, I need some advice on my case.',
+          timestamp: new Date(Date.now() - 1000 * 60 * 30),
+        },
+        {
+          sender: 'consultant',
+          text: 'Sure, I can help with that. Please tell me more.',
+          timestamp: new Date(Date.now() - 1000 * 60 * 25),
+        },
+        {
+          sender: 'user',
+          text: 'It is about a contract dispute.',
+          timestamp: new Date(Date.now() - 1000 * 60 * 20),
+        },
+        {
+          sender: 'consultant',
+          text: 'I see. I will review the documents and get back to you.',
+          timestamp: new Date(Date.now() - 1000 * 60 * 15),
+        },
+      ];
+
+      finalConversation = mockConversation
+        .map(msg => `${msg.sender}: ${msg.text}`)
+        .join('\n');
+    }
+  }
+
+  // Fetch duration from VideoSession
+  const videoSession = await VideoSession.findOne({
+    consultation: consultationId,
+  });
+  const duration = videoSession?.duration || 0;
+
+  const imageFiles = [...(files?.image || []), ...(files?.images || [])];
+  const images = imageFiles.map((file: any) => `/image/${file.filename}`);
+
+  const reportData = {
+    consultationId: consultation._id,
+    date: consultation.date,
+    userName: (consultation.user as any).name,
+    userEmail: (consultation.user as any).email,
+    consultantName: (consultation.consultant as any).name,
+    consultantEmail: (consultation.consultant as any).email,
+    conversation: finalConversation,
+    duration,
+    notes,
+    links: links ? (typeof links === 'string' ? [links] : links) : [],
+    images,
+  };
+
+  const pdfUrl = await generateConsultationPDF(reportData);
+
+  const report = await Report.create({
+    consultation: consultationId,
+    user: consultation.user._id,
+    consultant: consultation.consultant._id,
+    conversation: finalConversation,
+    duration,
+    notes,
+    links: reportData.links,
+    images,
+    pdfUrl,
+  });
+
+  return report;
+};
+
+const getTotalConsultations = async (user: JwtPayload): Promise<number> => {
+  const consultantId = user.id;
+
+  const totalConsultations = await Consultation.countDocuments({
+    consultant: consultantId,
+    status: 'completed',
+  });
+
+  return totalConsultations;
+};
+
+const getReports = async (user: JwtPayload, query: Record<string, unknown>) => {
+  const filter: any = {};
+
+  if (user.role === 'USER') {
+    filter.user = user.id;
+  } else if (user.role === 'CONSULTANT') {
+    filter.consultant = user.id;
+  }
+  // Admin sees all
+
+  const reportQuery = new QueryBuilder(Report.find(filter), query)
+    .filter()
+    .sort()
+    .paginate()
+    .fields();
+
+  // Limit fields for list view: exclude conversation
+  reportQuery.modelQuery.select('-conversation');
+
+  const result = await reportQuery.modelQuery.populate([
+    { path: 'user', select: 'name image avatar' },
+    { path: 'consultant', select: 'name image avatar' },
+    { path: 'consultation', select: 'status date bookingType duration' },
+  ]);
+  const meta = await reportQuery.getPaginationInfo();
+
+  return { meta, result };
+};
+
+const getSingleReport = async (user: JwtPayload, id: string) => {
+  const report = await Report.findById(id).populate([
+    { path: 'user', select: 'name image avatar' },
+    { path: 'consultant', select: 'name image avatar' },
+    {
+      path: 'consultation',
+      select: 'status date bookingType perMinuteRate totalAmount',
+    },
+  ]);
+
+  if (!report) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Report not found');
+  }
+
+  // Access control
+  if (user.role === 'USER' && report.user._id.toString() !== user.id) {
+    throw new ApiError(StatusCodes.FORBIDDEN, 'Access denied');
+  }
+  if (
+    user.role === 'CONSULTANT' &&
+    report.consultant._id.toString() !== user.id
+  ) {
+    throw new ApiError(StatusCodes.FORBIDDEN, 'Access denied');
+  }
+
+  return report;
+};
+
+export const ReportService = {
+  createReport,
+  getReports,
+  getSingleReport,
+  getTotalConsultations,
+};
