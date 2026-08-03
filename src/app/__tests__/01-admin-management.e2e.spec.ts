@@ -200,21 +200,21 @@ Then I should receive my profile details successfully
       expect(res.body.data.email).toBe(newConsultantEmail);
     });
 
-    it('should set consultant availability', async () => {
+    it('should set consultant unavailability', async () => {
       console.info(`
 📝 USER STORY:
-Title: Set My Available Time Slots
+Title: Set My Unavailable Time Slots
 
 As an active consultant
-I want to set my available time slots
-So that users can book consultations with me
+I want to set my unavailable time slots
+So that users cannot book consultations with me during these times
 
-📖 BDD SCENARIO: SET AVAILABILITY
-Feature: Consultant Availability
+📖 BDD SCENARIO: SET UNAVAILABILITY
+Feature: Consultant Unavailability
 
 Given I am an active consultant
-When I send a POST request to set my availability with specific time slots
-Then my availability should be successfully updated
+When I send a POST request to set my unavailability with specific time slots
+Then my unavailability should be successfully updated
 `);
       const payload = {
         slots: [
@@ -236,8 +236,8 @@ Then my availability should be successfully updated
         '/api/v1/consultation/unavailability',
         { headers: { Authorization: 'Bearer ***' }, body: payload },
         res.body,
-        'POST-CONSULTANT-AVAILABILITY',
-        'Consultant sets their availability',
+        'POST-CONSULTANT-UNAVAILABILITY',
+        'Consultant sets their unavailability',
       );
 
       expect(res.status).toBe(StatusCodes.OK);
@@ -247,17 +247,17 @@ Then my availability should be successfully updated
     it("should get the consultant's own availability setup", async () => {
       console.info(`
 📝 USER STORY:
-Title: View My Own Available Time Slots That I Just Set Up
+Title: View My Own Unavailable Time Slots That I Just Set Up
 
 As an active consultant
-I want to view my own available time slots that I just set up
+I want to view my own unavailable time slots that I just set up
 So that I can verify my schedule is correctly configured
 
-📖 BDD SCENARIO: VIEW OWN AVAILABILITY
-Feature: Consultant Availability
+📖 BDD SCENARIO: VIEW OWN UNAVAILABILITY
+Feature: Consultant Unavailability
 
-Given I have already set my availability
-When I send a GET request to fetch my own availability
+Given I have already set my unavailability
+When I send a GET request to fetch my own unavailability
 Then I should see the list of slots I configured
 `);
       const res = await request(app)
@@ -269,8 +269,8 @@ Then I should see the list of slots I configured
         '/api/v1/consultation/unavailability',
         { headers: { Authorization: 'Bearer ***' } },
         res.body,
-        'GET-MY-AVAILABILITY',
-        'Consultant views their own availability',
+        'GET-MY-UNAVAILABILITY',
+        'Consultant views their own unavailability',
       );
 
       expect(res.status).toBe(StatusCodes.OK);

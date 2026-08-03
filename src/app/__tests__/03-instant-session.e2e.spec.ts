@@ -225,6 +225,36 @@ And the consultant should receive an incoming-call socket event
       sessionId = res.body.data.session._id;
     });
 
+    it('should reject a duplicate instant booking from the same user', async () => {
+      const payload = {
+        consultantId: testUsers.consultantId,
+        bookingType: 'instant',
+      };
+
+      const res = await request(app)
+        .post('/api/v1/consultation/book')
+        .set('Authorization', `Bearer ${testUsers.normalUserToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(StatusCodes.CONFLICT);
+      expect(res.body.message).toContain('You already have an ongoing call request');
+    });
+
+    it('should reject an instant booking from a different user when consultant is busy', async () => {
+      const payload = {
+        consultantId: testUsers.consultantId,
+        bookingType: 'instant',
+      };
+
+      const res = await request(app)
+        .post('/api/v1/consultation/book')
+        .set('Authorization', `Bearer ${testUsers.adminToken}`) // using admin to simulate a different user calling
+        .send(payload);
+
+      expect(res.status).toBe(StatusCodes.CONFLICT);
+      expect(res.body.message).toContain('Consultant is currently busy on another call');
+    });
+
     it('[SOCKET] should emit incoming-call to the consultant immediately after booking', async () => {
       console.info(`
 🔌 USER STORY:

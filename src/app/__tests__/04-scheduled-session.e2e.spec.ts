@@ -25,21 +25,21 @@ describe('Scheduled Session E2E Tests (Fixpair)', () => {
   });
 
   describe('Scheduled Consultation Flow', () => {
-    it('should set availability for the consultant', async () => {
+    it('should set unavailability for the consultant', async () => {
       console.info(`
 📝 USER STORY:
-Title: Set My Availability For Scheduled Consultations
+Title: Set Unavailability
 
 As a consultant
-I want to set my availability for scheduled consultations
-So that users can book future sessions with me
+I want to set my unavailable slots
+So that users do not book me during these times
 
-📖 BDD SCENARIO: SET AVAILABILITY FOR SCHEDULED
-Feature: Scheduled Consultation Flow
+📖 BDD SCENARIO: SET UNAVAILABILITY
+Feature: Consultant Setup
 
 Given I am an active consultant
-When I send a POST request with specific date and time slots
-Then my availability should be recorded successfully
+When I send a POST request to set my unavailability with specific slots
+Then my unavailability is updated successfully
 `);
       const payload = {
         slots: [
@@ -52,17 +52,17 @@ Then my availability should be recorded successfully
       };
 
       const res = await request(app)
-        .post('/api/v1/consultation/availability')
+        .post('/api/v1/consultation/unavailability')
         .set('Authorization', `Bearer ${testUsers.consultantToken}`)
         .send(payload);
 
       logApi(
         'POST',
-        '/api/v1/consultation/availability',
+        '/api/v1/consultation/unavailability',
         { headers: { Authorization: 'Bearer ***' }, body: payload },
         res.body,
-        'POST-SET-AVAILABILITY',
-        'Consultant sets available slots',
+        'POST-SET-UNAVAILABILITY',
+        'Consultant sets unavailable slots',
       );
 
       expect(res.status).toBe(StatusCodes.OK);

@@ -245,16 +245,18 @@ const createBooking = async (
       );
     }
     
-    // Check for duplicate pending instant consultation
-    const existingPending = await Consultation.findOne({
-      user: new mongoose.Types.ObjectId(userId),
+    // Check if the consultant is already in a call or ringing
+    const consultantBusy = await Consultation.findOne({
       consultant: new mongoose.Types.ObjectId(consultantId),
       bookingType: 'instant',
-      status: 'pending'
+      status: { $in: ['pending', 'ongoing'] }
     });
 
-    if (existingPending) {
-      throw new ApiError(StatusCodes.CONFLICT, 'You already have an ongoing call request with this consultant.');
+    if (consultantBusy) {
+      if (consultantBusy.user.toString() === userId) {
+        throw new ApiError(StatusCodes.CONFLICT, 'You already have an ongoing call request with this consultant.');
+      }
+      throw new ApiError(StatusCodes.CONFLICT, 'Consultant is currently busy on another call.');
     }
 
     // Instant booking: starts as pending
