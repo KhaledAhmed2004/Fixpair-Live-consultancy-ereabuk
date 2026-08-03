@@ -6,7 +6,7 @@ const slotSchema = z.object({
   endTime: z.string({ required_error: 'End time is required' }),
 });
 
-const setAvailabilityZodSchema = z.object({
+const setUnavailabilityZodSchema = z.object({
   body: z.object({
     slots: z.array(slotSchema),
   }),
@@ -30,6 +30,7 @@ const updateBookingStatusZodSchema = z.object({
   body: z.object({
     status: z.enum([
       'pending',
+      'ongoing',
       'accepted',
       'rejected',
       'confirmed',
@@ -64,10 +65,10 @@ const cancelBookingZodSchema = z.object({
 });
 
 export const ConsultationValidation = {
-  setAvailabilityZodSchema,
+  setUnavailabilityZodSchema,
+  getAvailableSlotsZodSchema,
   createBookingZodSchema,
   updateBookingStatusZodSchema,
-  getAvailableSlotsZodSchema,
   rescheduleBookingZodSchema,
   cancelBookingZodSchema,
 };

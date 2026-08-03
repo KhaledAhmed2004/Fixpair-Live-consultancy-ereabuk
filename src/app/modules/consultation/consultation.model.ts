@@ -75,9 +75,13 @@ const consultationSchema = new Schema<IConsultation>(
       type: Number,
       default: 5,
     },
-    totalAmount: {
+    finalSettledAmount: {
       type: Number,
       default: 0,
+    },
+    preAuthIntentId: {
+      type: String,
+      default: null,
     },
     authorizedAmount: {
       type: Number,
@@ -93,7 +97,7 @@ const consultationSchema = new Schema<IConsultation>(
     },
     billingStatus: {
       type: String,
-      enum: ['pending', 'authorized', 'charging', 'failed', 'completed'],
+      enum: ['pending', 'authorized', 'active', 'failed', 'completed'],
       default: 'pending',
     },
     terminationReason: {
@@ -105,6 +109,7 @@ const consultationSchema = new Schema<IConsultation>(
       type: String,
       enum: [
         'pending',
+        'ongoing',
         'accepted',
         'rejected',
         'confirmed',
@@ -116,7 +121,7 @@ const consultationSchema = new Schema<IConsultation>(
     },
     paymentStatus: {
       type: String,
-      enum: ['pending', 'paid', 'failed'],
+      enum: ['pending', 'authorized', 'paid', 'failed'],
       default: 'pending',
     },
     remindersSent: {
@@ -137,8 +142,19 @@ const consultationSchema = new Schema<IConsultation>(
       default: null,
     },
   },
-  { timestamps: true },
+  { 
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+  },
 );
+
+consultationSchema.virtual('report', {
+  ref: 'Report',
+  localField: '_id',
+  foreignField: 'consultation',
+  justOne: true,
+});
 
 consultationSchema.index({ consultant: 1, date: 1, startTime: 1, endTime: 1 });
 consultationSchema.index({ user: 1, status: 1 });

@@ -1,4 +1,4 @@
-import { RtcTokenBuilder, RtcRole } from 'agora-access-token';
+import { RtcTokenBuilder, RtcRole } from 'agora-token';
 import config from '../config';
 import ApiError from '../errors/ApiError';
 import { StatusCodes } from 'http-status-codes';
@@ -32,6 +32,7 @@ export const generateAgoraToken = (
     channelName,
     uid,
     agoraRole,
+    privilegeExpiredTs,
     privilegeExpiredTs
   );
 

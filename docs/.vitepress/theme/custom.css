@@ -1,0 +1,735 @@
+:root {
+  --fp-stage-bg: var(--vp-c-bg-soft);
+  --fp-stage-border: var(--vp-c-divider);
+  --fp-accent: var(--vp-c-brand-1);
+  --fp-emotion-label-bg: #d9e4e6;
+  --fp-emotion-cell-bg: #f7f8f8;
+  --fp-emotion-divider: #b7d3e0;
+  --fp-emotion-border: #d7e0e4;
+  --fp-emotion-label-color: #1a1a1a;
+  --fp-emotion-name-color: #333;
+}
+
+.dark {
+  --fp-emotion-label-bg: #2a3438;
+  --fp-emotion-cell-bg: #1e2428;
+  --fp-emotion-divider: #4a6a7a;
+  --fp-emotion-border: #3a454b;
+  --fp-emotion-label-color: #f3f3f3;
+  --fp-emotion-name-color: #d0d0d0;
+}
+
+/* ── Wider content on large screens (journey tables / lanes) ── */
+
+@media (min-width: 1280px) {
+  :root {
+    --vp-layout-max-width: 1680px;
+  }
+
+  .VPDoc .content-container {
+    max-width: 1220px !important;
+  }
+}
+
+@media (min-width: 1440px) {
+  :root {
+    --vp-layout-max-width: 1840px;
+  }
+
+  .VPDoc .content-container {
+    max-width: 1400px !important;
+  }
+}
+
+@media (min-width: 1680px) {
+  :root {
+    --vp-layout-max-width: 2040px;
+  }
+
+  .VPDoc .content-container {
+    max-width: 1560px !important;
+  }
+}
+
+.journey-stages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin: 1.25rem 0 1.75rem;
+}
+
+.journey-stages .stage {
+  background: var(--fp-stage-bg);
+  border: 1px solid var(--fp-stage-border);
+  border-radius: 12px;
+  padding: 0.9rem 0.85rem;
+  text-align: center;
+}
+
+.journey-stages .stage strong {
+  display: block;
+  color: var(--fp-accent);
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+}
+
+.journey-stages .stage span {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--vp-c-text-2);
+  line-height: 1.35;
+}
+
+.journey-callout {
+  border-left: 4px solid var(--fp-accent);
+  background: var(--fp-stage-bg);
+  padding: 0.85rem 1rem;
+  border-radius: 0 10px 10px 0;
+  margin: 1rem 0 1.5rem;
+}
+
+.journey-callout p {
+  margin: 0;
+  color: var(--vp-c-text-1);
+}
+
+/* ── Emotion lane (screenshot-style journey emotions row) ── */
+
+.emotion-lane-wrap {
+  margin: 1rem 0 1.75rem;
+}
+
+.emotion-lane-caption {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--vp-c-text-2);
+}
+
+.emotion-lane {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  border: 1px solid var(--fp-emotion-border);
+  border-radius: 4px;
+  overflow-x: auto;
+  background: var(--fp-emotion-cell-bg);
+}
+
+.emotion-lane__label {
+  flex: 0 0 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fp-emotion-label-bg);
+  color: var(--fp-emotion-label-color);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-right: 1px dashed var(--fp-emotion-divider);
+  padding: 0.85rem 0.5rem;
+}
+
+.emotion-lane__track {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.emotion-cell {
+  flex: 1 1 0;
+  min-width: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.85rem 0.5rem;
+  text-align: center;
+  background: var(--fp-emotion-cell-bg);
+  border-right: 1px dashed var(--fp-emotion-divider);
+}
+
+.emotion-cell:last-child {
+  border-right: none;
+}
+
+.emotion-cell__face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.55rem;
+  line-height: 1;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+.dark .emotion-cell__face {
+  background: #2c3338;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 35%);
+}
+
+.emotion-cell__name {
+  font-size: 0.82rem;
+  color: var(--fp-emotion-name-color);
+  line-height: 1.2;
+}
+
+.emotion-lane--failure .emotion-lane__label {
+  background: #f0d9d6;
+}
+
+.dark .emotion-lane--failure .emotion-lane__label {
+  background: #4a2f2c;
+}
+
+.emotion-lane--compact .emotion-lane__label {
+  flex-basis: 96px;
+  font-size: 0.72rem;
+}
+
+.emotion-lane--compact .emotion-cell {
+  min-width: 72px;
+  padding: 0.65rem 0.35rem;
+}
+
+.emotion-lane--compact .emotion-cell__face {
+  width: 1.7rem;
+  height: 1.7rem;
+  font-size: 1.25rem;
+}
+
+.emotion-lane--compact .emotion-cell__name {
+  font-size: 0.72rem;
+}
+
+@media (max-width: 640px) {
+  .emotion-lane__label {
+    flex-basis: 84px;
+    font-size: 0.68rem;
+    padding: 0.65rem 0.35rem;
+  }
+
+  .emotion-cell {
+    min-width: 76px;
+    padding: 0.7rem 0.3rem;
+  }
+}
+
+/* ── Emotion pills (step-table Emotion column) ── */
+
+.emotion-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.55rem 0.22rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  border: 1px solid transparent;
+  vertical-align: middle;
+}
+
+.emotion-pill__face {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+/* neutral / thinking */
+.emotion-pill--neutral {
+  background: rgb(100 116 139 / 14%);
+  border-color: rgb(100 116 139 / 28%);
+  color: #334155;
+}
+
+.dark .emotion-pill--neutral {
+  background: rgb(148 163 184 / 16%);
+  border-color: rgb(148 163 184 / 28%);
+  color: #e2e8f0;
+}
+
+/* positive */
+.emotion-pill--positive {
+  background: rgb(34 197 94 / 14%);
+  border-color: rgb(34 197 94 / 30%);
+  color: #166534;
+}
+
+.dark .emotion-pill--positive {
+  background: rgb(74 222 128 / 14%);
+  border-color: rgb(74 222 128 / 28%);
+  color: #bbf7d0;
+}
+
+/* tension / caution */
+.emotion-pill--tense {
+  background: rgb(245 158 11 / 16%);
+  border-color: rgb(245 158 11 / 32%);
+  color: #92400e;
+}
+
+.dark .emotion-pill--tense {
+  background: rgb(251 191 36 / 14%);
+  border-color: rgb(251 191 36 / 28%);
+  color: #fde68a;
+}
+
+/* negative / friction */
+.emotion-pill--negative {
+  background: rgb(239 68 68 / 14%);
+  border-color: rgb(239 68 68 / 28%);
+  color: #991b1b;
+}
+
+.dark .emotion-pill--negative {
+  background: rgb(248 113 113 / 14%);
+  border-color: rgb(248 113 113 / 28%);
+  color: #fecaca;
+}
+
+/* ── Journey board table (step-by-step) ── */
+
+.journey-board {
+  margin: 1rem 0 1.85rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 14px;
+  overflow-x: auto;
+  background: var(--vp-c-bg-soft);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 3%) inset;
+}
+
+.journey-board table {
+  display: table;
+  width: 100%;
+  min-width: 980px;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0 !important;
+  overflow: visible;
+}
+
+.journey-board thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--vp-c-bg-elv);
+  color: var(--vp-c-text-2);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 0.85rem 0.9rem !important;
+  border-bottom: 1px solid var(--vp-c-divider);
+  white-space: nowrap;
+}
+
+.journey-board tbody td {
+  padding: 0.95rem 0.9rem !important;
+  border-bottom: 1px solid var(--vp-c-divider);
+  vertical-align: middle;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  background: transparent;
+}
+
+.journey-board tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.journey-board tbody tr:nth-child(even) td {
+  background: rgb(148 163 184 / 6%);
+}
+
+.dark .journey-board tbody tr:nth-child(even) td {
+  background: rgb(255 255 255 / 2.5%);
+}
+
+.journey-board tbody tr:hover td {
+  background: rgb(99 102 241 / 8%);
+}
+
+.dark .journey-board tbody tr:hover td {
+  background: rgb(129 140 248 / 10%);
+}
+
+.journey-board .step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+}
+
+.stage-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.stage-chip--discover {
+  background: rgb(56 189 248 / 14%);
+  border-color: rgb(56 189 248 / 28%);
+  color: #0369a1;
+}
+
+.dark .stage-chip--discover {
+  color: #7dd3fc;
+}
+
+.stage-chip--decide {
+  background: rgb(167 139 250 / 14%);
+  border-color: rgb(167 139 250 / 28%);
+  color: #6d28d9;
+}
+
+.dark .stage-chip--decide {
+  color: #c4b5fd;
+}
+
+.stage-chip--book {
+  background: rgb(251 146 60 / 14%);
+  border-color: rgb(251 146 60 / 28%);
+  color: #c2410c;
+}
+
+.dark .stage-chip--book {
+  color: #fdba74;
+}
+
+.stage-chip--experience {
+  background: rgb(52 211 153 / 14%);
+  border-color: rgb(52 211 153 / 28%);
+  color: #047857;
+}
+
+.dark .stage-chip--experience {
+  color: #6ee7b7;
+}
+
+.stage-chip--after {
+  background: rgb(148 163 184 / 14%);
+  border-color: rgb(148 163 184 / 28%);
+  color: #475569;
+}
+
+.dark .stage-chip--after {
+  color: #cbd5e1;
+}
+
+.user-thought {
+  display: inline-block;
+  font-style: italic;
+  color: var(--vp-c-text-2);
+  font-size: 0.86rem;
+}
+
+.screen-tag {
+  display: inline-block;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.78rem;
+  padding: 0.12rem 0.4rem;
+  border-radius: 6px;
+  background: rgb(148 163 184 / 12%);
+  color: var(--vp-c-text-1);
+}
+
+.backend-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.backend-flag--yes {
+  background: rgb(34 197 94 / 16%);
+  color: #16a34a;
+}
+
+.dark .backend-flag--yes {
+  color: #86efac;
+}
+
+.backend-flag--no {
+  background: rgb(148 163 184 / 14%);
+  color: var(--vp-c-text-3);
+}
+
+.backend-flag--optional {
+  background: rgb(245 158 11 / 16%);
+  color: #d97706;
+  font-size: 0.65rem;
+  min-width: auto;
+  padding: 0 0.4rem;
+}
+
+.dark .backend-flag--optional {
+  color: #fbbf24;
+}
+
+.journey-board td .emotion-pill {
+  margin: 0;
+}
+
+/* ── Screenshot-style journey canvas (stages as columns) ── */
+
+.journey-canvas-wrap {
+  margin: 1.1rem 0 1.85rem;
+}
+
+.journey-canvas-caption {
+  margin: 0 0 0.55rem;
+  font-size: 0.85rem;
+  color: var(--vp-c-text-2);
+}
+
+.journey-canvas {
+  --jc-gap: 0.45rem;
+  --jc-stages: 5;
+  display: grid;
+  grid-template-columns: 7.5rem repeat(var(--jc-stages), minmax(140px, 1fr));
+  gap: var(--jc-gap);
+  overflow-x: auto;
+  padding: 0.35rem;
+  min-width: 0;
+}
+
+.jc-cell {
+  border-radius: 12px;
+  padding: 0.75rem 0.7rem;
+  min-height: 3.2rem;
+  background: #eef1f3;
+  color: #1f2937;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.dark .jc-cell {
+  background: #2a3036;
+  color: #e5e7eb;
+}
+
+.jc-cell--label {
+  display: flex;
+  align-items: center;
+  background: #c5d4d8;
+  color: #0f172a;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dark .jc-cell--label {
+  background: #3a4a50;
+  color: #f8fafc;
+}
+
+.jc-cell--stage {
+  background: #f3e7b5;
+  color: #422006;
+  font-weight: 800;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+
+.dark .jc-cell--stage {
+  background: #5c4d24;
+  color: #fef3c7;
+}
+
+.jc-cell--stage .jc-stage-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.jc-cell--stage .jc-stage-name {
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+.jc-cell--stage .jc-arrow {
+  opacity: 0.55;
+  font-size: 0.95rem;
+}
+
+.jc-cell--corner {
+  background: #f3e7b5;
+  font-weight: 800;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  color: #422006;
+}
+
+.dark .jc-cell--corner {
+  background: #5c4d24;
+  color: #fef3c7;
+}
+
+.jc-cell--opportunity-label {
+  background: #f0c9a8;
+  color: #7c2d12;
+}
+
+.dark .jc-cell--opportunity-label {
+  background: #6b3d24;
+  color: #ffedd5;
+}
+
+.jc-cell--opportunity {
+  background: #f7e4d4;
+}
+
+.dark .jc-cell--opportunity {
+  background: #3f2f28;
+}
+
+.jc-cell--emotions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  text-align: center;
+  min-height: 4.4rem;
+}
+
+.jc-emo-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 1.35rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+}
+
+.dark .jc-emo-face {
+  background: #1f2937;
+}
+
+.jc-emo-name {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.jc-list {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.jc-list li {
+  margin: 0.15rem 0;
+}
+
+.jc-touch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.jc-touch-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  background: #f97316;
+  color: #fff;
+  font-size: 0.85rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+.jc-note {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.dark .jc-note {
+  color: #94a3b8;
+}
+
+@media (max-width: 900px) {
+  .journey-canvas {
+    grid-template-columns: 6.2rem repeat(var(--jc-stages), minmax(150px, 1fr));
+  }
+}
+
+/* Other markdown tables: keep readable scroll without breaking layout */
+.vp-doc .journey-board + *,
+.vp-doc table {
+  max-width: 100%;
+}
+
+.vp-doc > div > table,
+.vp-doc .vp-doc table {
+  display: table;
+}
+
+/* ── Mermaid visual flow (modern card) ── */
+
+.vp-doc .mermaid {
+  margin: 1rem 0 1.75rem;
+  padding: 1.5rem 1.25rem;
+  border-radius: 16px;
+  border: 1px solid rgb(56 189 248 / 22%);
+  background:
+    radial-gradient(1200px 400px at 10% -10%, rgb(56 189 248 / 10%), transparent 55%),
+    radial-gradient(900px 360px at 90% 0%, rgb(129 140 248 / 10%), transparent 50%),
+    #0b1220;
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 3%) inset,
+    0 10px 30px rgb(0 0 0 / 22%);
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.vp-doc .mermaid svg {
+  display: block;
+  margin: 0 auto;
+  max-width: none;
+  min-width: 100%;
+  height: auto;
+}
+
+/* Keep edge chips only — never touch node label box sizing */
+.vp-doc .mermaid .edgeLabel foreignObject > div,
+.vp-doc .mermaid .edgeLabel span {
+  border-radius: 999px !important;
+  font-weight: 700 !important;
+}

@@ -8,6 +8,7 @@ import fs from 'fs';
 import { IInvoice } from './payment.interface';
 import { Invoice, Transaction } from './payment.model';
 import { Consultation } from '../consultation/consultation.model';
+import { VideoSession } from '../videoSession/videoSession.model';
 import { User } from '../user/user.model';
 import ApiError from '../../../errors/ApiError';
 import { StatusCodes } from 'http-status-codes';
@@ -405,10 +406,30 @@ const finalizeInvoice = async (consultationId: string) => {
     await Consultation.findById(consultationId).populate('user consultant');
   if (!consultation) return;
 
-  const duration = Math.ceil(
-    (Date.now() - new Date((consultation as any).createdAt).getTime()) / 60000,
-  );
-  const subtotal = consultation.consumedAmount - consultation.platformFee;
+  const session = await VideoSession.findOne({ consultation: consultationId });
+
+  let duration = 0;
+  if (session?.startedAt && session?.endedAt) {
+    duration = Math.ceil(
+      (session.endedAt.getTime() - session.startedAt.getTime()) / 60000,
+    );
+  } else if (session?.startedAt) {
+    console.warn(`[INVOICE] Missing endedAt for consultation ${consultationId}, using Date.now()`);
+    duration = Math.ceil((Date.now() - session.startedAt.getTime()) / 60000);
+  } else {
+    console.warn(`[INVOICE] Missing startedAt for consultation ${consultationId}, deriving from consumedAmount`);
+    duration = consultation.perMinuteRate > 0
+      ? Math.ceil(consultation.consumedAmount / consultation.perMinuteRate)
+      : 0;
+  }
+
+  const allTransactions = await Transaction.find({
+    consultation: consultationId,
+    status: 'captured',
+  });
+  const finalSettledAmount = allTransactions.reduce((sum, t) => sum + t.amount, 0);
+
+  const subtotal = finalSettledAmount - consultation.platformFee;
 
   // Find associated transaction to get provider
   const transaction = await Transaction.findOne({
@@ -457,6 +478,7 @@ const finalizeInvoice = async (consultationId: string) => {
     status: 'completed',
     billingStatus: 'completed',
     paymentStatus: 'paid',
+    finalSettledAmount,
   });
 
   // Increment consultant's total consultations and clear cache

@@ -50,11 +50,20 @@ const attachPaymentMethod = catchAsync(async (req: Request, res: Response) => {
   const { paymentMethodId } = req.body;
 
   const userData = await User.findById(user.id);
-  if (!userData || !userData.stripeCustomerId) {
-    throw new ApiError(
-      StatusCodes.BAD_REQUEST,
-      'User must be a Stripe customer first',
+  if (!userData) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+  }
+
+  let stripeCustomerId = userData.stripeCustomerId;
+
+  if (!stripeCustomerId) {
+    const customer = await StripeService.createCustomer(
+      userData.email,
+      userData.name,
     );
+    stripeCustomerId = customer.id;
+    userData.stripeCustomerId = stripeCustomerId;
+    await userData.save();
   }
 
   // Check if this payment method is already in our DB for this user
@@ -68,9 +77,9 @@ const attachPaymentMethod = catchAsync(async (req: Request, res: Response) => {
       await StripeService.stripe.paymentMethods.retrieve(paymentMethodId);
 
     // 2. If it's not already attached to this customer, attach it
-    if (method.customer !== userData.stripeCustomerId) {
+    if (method.customer !== stripeCustomerId) {
       await StripeService.attachPaymentMethod(
-        userData.stripeCustomerId,
+        stripeCustomerId,
         paymentMethodId,
       );
     }

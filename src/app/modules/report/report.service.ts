@@ -244,6 +244,14 @@ const createReport = async (user: JwtPayload, payload: any, files: any) => {
     );
   }
 
+  const existingReport = await Report.findOne({ consultation: consultationId });
+  if (existingReport) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'Report already exists for this consultation',
+    );
+  }
+
   if (consultation.consultant._id.toString() !== user.id) {
     throw new ApiError(
       StatusCodes.FORBIDDEN,

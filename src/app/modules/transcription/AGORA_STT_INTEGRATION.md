@@ -26,10 +26,14 @@ Agora does **not** push recognized text to the backend over HTTP. The STT bot
 (UID `9001`) publishes each recognized chunk as an **RTC data-stream message**
 inside the channel — only clients joined to that channel receive it. Your app
 must subscribe to that data stream (Agora SDK `onStreamMessage` /
-`RtcEngineEventHandler.onStreamMessage`, decoded per Agora's RTT message
-format) and forward each decoded chunk here so the backend can persist
-finalized transcripts and re-broadcast them (e.g. to a web dashboard that
-isn't joined to the RTC channel).
+`RtcEngineEventHandler.onStreamMessage`), decode it, and forward each chunk
+here so the backend can persist finalized transcripts and re-broadcast them
+(e.g. to a web dashboard that isn't joined to the RTC channel).
+
+**Decode format:** Backend starts the STT agent with
+`rtcConfig.enableJsonProtocol: true`, so data-stream payloads are
+**gzip-compressed JSON** (not Protobuf). On the client: gunzip if needed →
+`JSON.parse` → relay the fields below.
 
 **Endpoint**: `POST /api/v1/transcription/:consultationId/ingest`
 **Auth**: Required (User/Consultant — must be a participant of the session)

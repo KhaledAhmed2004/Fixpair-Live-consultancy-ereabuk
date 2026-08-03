@@ -14,6 +14,7 @@ import { USER_ROLES } from '../../../enums/user';
 import config from '../../../config';
 import { NotificationService } from '../notification/notification.service';
 import { cacheHelper } from '../../utils/cache';
+import { VideoSessionService } from '../videoSession/videoSession.service';
 
 const startOfDay = (date: Date): Date => {
   const result = new Date(date);
@@ -21,7 +22,7 @@ const startOfDay = (date: Date): Date => {
   return result;
 };
 
-const setAvailability = async (user: JwtPayload, slots: ISlot[]) => {
+const setUnavailability = async (user: JwtPayload, slots: ISlot[]) => {
   const consultantId = user.id;
 
   // 1. Validate slots are within the next 30 days
@@ -60,7 +61,7 @@ const setAvailability = async (user: JwtPayload, slots: ISlot[]) => {
   return result;
 };
 
-const getMyAvailability = async (user: JwtPayload) => {
+const getMyUnavailability = async (user: JwtPayload) => {
   const consultantId = user.id;
 
   const availability = await Availability.findOne({ consultant: consultantId });
@@ -235,8 +236,27 @@ const createBooking = async (
     if (notes) consultationData.notes = notes;
 
     const result = await Consultation.create(consultationData);
-    return result;
+    return { consultation: result, session: null };
   } else if (bookingType === 'instant') {
+    if (!consultant.activeStatus) {
+      throw new ApiError(
+        StatusCodes.BAD_REQUEST,
+        'Consultant is currently unavailable for instant consultation.',
+      );
+    }
+    
+    // Check for duplicate pending instant consultation
+    const existingPending = await Consultation.findOne({
+      user: new mongoose.Types.ObjectId(userId),
+      consultant: new mongoose.Types.ObjectId(consultantId),
+      bookingType: 'instant',
+      status: 'pending'
+    });
+
+    if (existingPending) {
+      throw new ApiError(StatusCodes.CONFLICT, 'You already have an ongoing call request with this consultant.');
+    }
+
     // Instant booking: starts as pending
     const instantBookingData: any = {
       user: new mongoose.Types.ObjectId(userId),
@@ -249,8 +269,12 @@ const createBooking = async (
     };
     if (notes) instantBookingData.notes = notes;
 
-    const result = await Consultation.create(instantBookingData);
-    return result;
+    const consultation = await Consultation.create(instantBookingData);
+    
+    // Delegate to VideoSessionService to handle session creation, token, and signaling
+    const session = await VideoSessionService.createSession(user, consultation._id.toString());
+
+    return { consultation, session };
   } else if (bookingType === 'callback') {
     if (!preferredWindow) {
       throw new ApiError(
@@ -273,7 +297,7 @@ const createBooking = async (
     if (notes) callbackBookingData.notes = notes;
 
     const result = await Consultation.create(callbackBookingData);
-    return result;
+    return { consultation: result, session: null };
   }
 };
 
@@ -300,6 +324,7 @@ const getMyBookings = async (
   const result = await bookingQuery.modelQuery.populate([
     { path: 'user', select: 'name image avatar email' },
     { path: 'consultant', select: 'name image avatar email tags' },
+    { path: 'report', select: '_id pdfUrl createdAt' },
   ]);
   const meta = await bookingQuery.getPaginationInfo();
 
@@ -660,7 +685,8 @@ const getConsultantTotalConsultations = async (consultantId: string) => {
 };
 
 export const ConsultationService = {
-  setAvailability,
+  setUnavailability,
+  getMyUnavailability,
   getAvailableSlots,
   createBooking,
   getMyBookings,
@@ -668,5 +694,4 @@ export const ConsultationService = {
   getConsultantTotalConsultations,
   rescheduleBooking,
   cancelBooking,
-  getMyAvailability,
 };

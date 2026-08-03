@@ -6,7 +6,7 @@
 import { StatusCodes } from 'http-status-codes';
 import { JwtPayload } from 'jsonwebtoken';
 import mongoose from 'mongoose';
-import { RtcTokenBuilder, RtcRole } from 'agora-access-token';
+import { RtcTokenBuilder, RtcRole } from 'agora-token';
 import config from '../../../config';
 import ApiError from '../../../errors/ApiError';
 import { Consultation } from '../consultation/consultation.model';
@@ -20,6 +20,10 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Consultation not found');
   }
 
+  if (consultation.bookingType === 'callback') {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Video sessions are not supported for callback consultations');
+  }
+
   // Verify that the user is part of the consultation
   if (
     consultation.user.toString() !== user.id &&
@@ -28,6 +32,14 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
     throw new ApiError(
       StatusCodes.FORBIDDEN,
       'You are not part of this consultation',
+    );
+  }
+
+  const ALLOWED_STATUSES = ['pending', 'confirmed', 'accepted'];
+  if (!ALLOWED_STATUSES.includes(consultation.status)) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      `Cannot create a video session for a consultation with status: ${consultation.status}`,
     );
   }
 
@@ -123,6 +135,14 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
     );
   }
 
+  const consultation = await Consultation.findById(session.consultation);
+  if (consultation && consultation.bookingType === 'callback') {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'Video sessions are not supported for callback consultations',
+    );
+  }
+
   // Verify that the user is part of the session
   if (
     session.user.toString() !== user.id &&
@@ -134,7 +154,8 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
     );
   }
 
-  // Update status to ongoing if it's the first time joining
+  const uid = user.role === 'USER' ? 1001 : 2001;
+
   if (session.status === 'pending') {
     // Atomic update to prevent race conditions when both users join simultaneously
     const updatedSession = await VideoSession.findOneAndUpdate(
@@ -147,32 +168,39 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
       // 1. Trigger billing first (this includes the 5-minute pre-auth check)
       try {
         await BillingService.startBilling(session.consultation.toString());
+        await mongoose.model('Consultation').updateOne(
+          { _id: session.consultation },
+          { status: 'ongoing' }
+        );
       } catch (error) {
         // If billing fails, revert status so it can be retried
-        await VideoSession.updateOne({ _id: sessionId }, { status: 'pending' });
+        await VideoSession.updateOne({ _id: sessionId }, { status: 'pending', startedAt: null });
         throw error;
       }
 
       // 2. Start Transcription
-      try {
-        await TranscriptionService.startTranscription(
-          session.consultation.toString(),
-        );
-      } catch (error) {
-        console.error('Failed to start transcription:', error);
-        // We don't want to block the session if STT fails
-      }
+      TranscriptionService.startTranscription(session.consultation.toString())
+        .catch(async (sttError) => {
+          console.error('STT startup failed:', sttError);
+          await VideoSession.findByIdAndUpdate(sessionId, {
+            $set: { transcriptionStatus: 'failed' },
+          });
+          socketHelper.emitToUser(user.id, 'transcription-failed', {
+            sessionId,
+            consultationId: session.consultation.toString(),
+            message: 'Transcription could not be started. Billing continues normally.',
+          });
+        });
     }
   }
-
-  // Add the assigned UID to the response for the frontend
-  const uid = user.role === 'USER' ? 1001 : 2001;
 
   // Generate a fresh token for this specific user/UID
   const token = generateAgoraToken(session.channelName, uid);
 
+  const freshSession = await VideoSession.findById(sessionId);
+
   return {
-    ...session.toObject(),
+    ...freshSession!.toObject(),
     token, // Return the fresh token instead of the one in DB
     uid,
     appId: config.agora.appId,
@@ -186,7 +214,7 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
   }
 
   if (session.status === 'ended') {
-    return session;
+    return await VideoSession.findById(sessionId);
   }
 
   // Verify that the user is part of the session
@@ -201,33 +229,29 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
   }
 
   const endedAt = new Date();
-  session.status = 'ended';
-  session.endedAt = endedAt;
+  const duration = session.startedAt
+    ? Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000)
+    : 0;
 
-  if (session.startedAt) {
-    // Calculate duration in seconds
-    const duration = Math.floor(
-      (endedAt.getTime() - session.startedAt.getTime()) / 1000,
-    );
-    session.duration = duration;
-  }
-
-  await session.save();
+  await VideoSession.findByIdAndUpdate(sessionId, {
+    status: 'ended',
+    endedAt,
+    duration,
+    transcriptionStatus: 'stopping',
+  });
 
   // Stop transcription
   try {
-    await TranscriptionService.stopTranscription(
-      session.consultation.toString(),
-    );
-  } catch (error) {
-    console.error('Failed to stop transcription:', error);
+    await TranscriptionService.stopTranscription(session.consultation.toString());
+  } catch (err) {
+    console.error('Failed to stop transcription:', err);
   }
 
   // Stop billing and generate invoice
-  BillingService.stopBilling(session.consultation.toString());
+  await BillingService.stopBilling(session.consultation.toString());
   await InvoiceService.finalizeInvoice(session.consultation.toString());
 
-  return session;
+  return await VideoSession.findById(sessionId);
 };
 
 const getMySessions = async (user: JwtPayload) => {
@@ -268,8 +292,18 @@ const handleCallAction = async (
 
   if (action === 'REJECT') {
     // Recipient rejected the call
-    session.status = 'ended';
-    await session.save();
+    const endedAt = new Date();
+    await VideoSession.findByIdAndUpdate(sessionId, {
+      status: 'ended',
+      endedAt,
+      duration: 0,
+    });
+    
+    await Consultation.findByIdAndUpdate(session.consultation, {
+      status: 'cancelled',
+      terminationReason: 'manual',
+      cancelledAt: endedAt,
+    });
 
     // Notify the caller
     socketHelper.emitToUser(recipientId, 'call-rejected', { sessionId });
@@ -281,8 +315,18 @@ const handleCallAction = async (
     }
   } else if (action === 'CANCEL') {
     // Caller cancelled the call
-    session.status = 'ended';
-    await session.save();
+    const endedAt = new Date();
+    await VideoSession.findByIdAndUpdate(sessionId, {
+      status: 'ended',
+      endedAt,
+      duration: 0,
+    });
+    
+    await Consultation.findByIdAndUpdate(session.consultation, {
+      status: 'cancelled',
+      terminationReason: 'manual',
+      cancelledAt: endedAt,
+    });
 
     // Notify the recipient
     socketHelper.emitToUser(recipientId, 'call-cancelled', { sessionId });

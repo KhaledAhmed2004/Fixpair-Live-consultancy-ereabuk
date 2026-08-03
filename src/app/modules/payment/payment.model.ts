@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose';
-import { ITransaction, IInvoice } from './payment.interface';
+import { ITransaction, IInvoice, IBillingTransaction } from './payment.interface';
 
 const transactionSchema = new Schema<ITransaction>(
   {
@@ -76,3 +76,50 @@ invoiceSchema.index({ user: 1 });
 invoiceSchema.index({ invoiceNumber: 1 }, { unique: true });
 
 export const Invoice = model<IInvoice>('Invoice', invoiceSchema);
+
+const billingTransactionSchema = new Schema<IBillingTransaction>(
+  {
+    consultationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Consultation',
+      required: true,
+    },
+    billingMinute: {
+      type: Number,
+      required: true,
+    },
+    type: {
+      type: String,
+      enum: ['preauth', 'charge', 'adjustment', 'refund'],
+      required: true,
+    },
+    amount: {
+      type: Number,
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'processing', 'succeeded', 'failed', 'unknown'],
+      default: 'pending',
+    },
+    stripePaymentIntentId: {
+      type: String,
+    },
+    idempotencyKey: {
+      type: String,
+      required: true,
+    },
+    processingStartedAt: {
+      type: Date,
+    },
+  },
+  { timestamps: true }
+);
+
+// P0 Requirement: Unique compound index to prevent duplicate charges
+billingTransactionSchema.index({ consultationId: 1, billingMinute: 1, type: 1 }, { unique: true });
+
+export const BillingTransaction = model<IBillingTransaction>(
+  'BillingTransaction',
+  billingTransactionSchema
+);

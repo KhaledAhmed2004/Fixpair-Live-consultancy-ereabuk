@@ -8,9 +8,9 @@ import sendResponse from '../../../shared/sendResponse';
 import { ConsultationService } from './consultation.service';
 import { ParsedQs } from 'qs';
 
-const setAvailability = catchAsync(async (req: Request, res: Response) => {
+const setUnavailability = catchAsync(async (req: Request, res: Response) => {
   const user = req.user as any;
-  const result = await ConsultationService.setAvailability(
+  const result = await ConsultationService.setUnavailability(
     user,
     req.body.slots,
   );
@@ -18,19 +18,19 @@ const setAvailability = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, {
     success: true,
     statusCode: StatusCodes.OK,
-    message: 'Availability set successfully',
+    message: 'Unavailability set successfully',
     data: result,
   });
 });
 
-const getMyAvailability = catchAsync(async (req: Request, res: Response) => {
+const getMyUnavailability = catchAsync(async (req: Request, res: Response) => {
   const user = req.user as any;
-  const result = await ConsultationService.getMyAvailability(user);
+  const result = await ConsultationService.getMyUnavailability(user);
 
   sendResponse(res, {
     success: true,
     statusCode: StatusCodes.OK,
-    message: 'My availability retrieved successfully',
+    message: 'My unavailability retrieved successfully',
     data: result,
   });
 });
@@ -127,9 +127,8 @@ const cancelBooking = catchAsync(async (req: Request, res: Response) => {
 const getConsultantTotalConsultations = catchAsync(
   async (req: Request, res: Response) => {
     const { consultantId } = req.params;
-    const result = await ConsultationService.getConsultantTotalConsultations(
-      consultantId,
-    );
+    const result =
+      await ConsultationService.getConsultantTotalConsultations(consultantId);
 
     sendResponse(res, {
       success: true,
@@ -141,8 +140,8 @@ const getConsultantTotalConsultations = catchAsync(
 );
 
 export const ConsultationController = {
-  setAvailability,
-  getMyAvailability,
+  setUnavailability,
+  getMyUnavailability,
   getAvailableSlots,
   createBooking,
   getMyBookings,

@@ -73,10 +73,12 @@ The Web SDK emits `stream-message` for any data-stream messages published in
 the channel — including the ones from the STT bot (`uid === 9001`). Decode
 them and POST each chunk to the backend's `/ingest` endpoint.
 
-> **Confirm the exact byte layout with Agora's current Real-Time
-> Transcription docs** for your project/region — the snippet below assumes a
-> JSON-encoded UTF-8 payload, which is the common case, but some STT product
-> versions use a binary/protobuf envelope that needs a dedicated decoder.
+> Backend starts STT with `enableJsonProtocol: true`, so captions are
+> **gzip-compressed JSON** (not the Agora Protobuf default). Decode UTF-8
+> (gunzip first if the SDK gives you raw compressed bytes), then `JSON.parse`.
+> Exact field names can vary slightly by SDK version — map `uid` / speaker,
+> `text` (or joined `words[].text`), `isFinal` / `is_final`, and `timestamp`
+> / `text_ts` into the `/ingest` body below.
 
 ```ts
 import axios from 'axios';
@@ -89,6 +91,7 @@ client.on('stream-message', async (uid, payload) => {
 
   let result: { uid: number; text: string; isFinal: boolean; timestamp: number };
   try {
+    // enableJsonProtocol: gzip+JSON. If parse fails, try gunzip then parse.
     result = JSON.parse(textDecoder.decode(payload));
   } catch {
     return; // not a recognition message we understand — ignore

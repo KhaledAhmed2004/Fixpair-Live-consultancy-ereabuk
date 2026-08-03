@@ -10,6 +10,7 @@ import { ReportRoutes } from '../app/modules/report/report.route';
 import { VideoSessionRoutes } from '../app/modules/videoSession/videoSession.route';
 import { PaymentRoutes } from '../app/modules/payment/payment.route';
 import { AdminRoutes } from '../app/modules/admin/admin.route';
+import { ConsultantOverviewRoutes } from '../app/modules/consultantOverview/consultantOverview.route';
 import { RecommendationRoutes } from '../app/modules/recommendation/recommendation.route';
 import { TranscriptionRoutes } from '../app/modules/transcription/transcription.route';
 import { NotificationRoutes } from '../app/modules/notification/notification.route';
@@ -66,6 +67,10 @@ const apiRoutes = [
   {
     path: '/admin',
     route: AdminRoutes,
+  },
+  {
+    path: '/consultant',
+    route: ConsultantOverviewRoutes,
   },
   {
     path: '/recommendation',

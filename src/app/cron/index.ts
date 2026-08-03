@@ -5,6 +5,7 @@ import cron from 'node-cron';
 import { ConsultationService } from '../modules/consultation/consultation.service';
 import { NotificationService } from '../modules/notification/notification.service';
 import { Consultation } from '../modules/consultation/consultation.model';
+import { VideoSession } from '../modules/videoSession/videoSession.model';
 import { logger } from '../../shared/logger';
 
 const cronJobs = () => {
@@ -75,6 +76,68 @@ const cronJobs = () => {
       logger.info('Cron job completed: consultationReminders');
     } catch (error) {
       logger.error('Cron job failed: consultationReminders', error);
+    }
+  });
+
+  // Run every minute to check for expired instant consultations
+  cron.schedule('* * * * *', async () => {
+    try {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      
+      const result = await Consultation.updateMany(
+        { 
+          bookingType: 'instant', 
+          status: 'pending', 
+          createdAt: { $lt: fiveMinutesAgo } 
+        },
+        { $set: { status: 'expired' } }
+      );
+      
+      if (result.modifiedCount > 0) {
+        logger.info(`Expired ${result.modifiedCount} pending instant consultations.`);
+      }
+    } catch (error) {
+      logger.error('Cron job failed: expireInstantConsultations', error);
+    }
+  });
+
+  // Run every 5 minutes: expire scheduled consultations 15 minutes past their start time
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+
+      // Find confirmed/accepted consultations where the scheduled time was > 15 minutes ago
+      // and no VideoSession exists (i.e., nobody joined)
+      const expiredCandidates = await Consultation.find({
+        bookingType: 'scheduled',
+        status: { $in: ['confirmed', 'accepted'] },
+        date: { $lt: fifteenMinutesAgo },
+      });
+
+      for (const consultation of expiredCandidates) {
+        // Only expire if no session has been created (or no ongoing session exists)
+        const session = await VideoSession.findOne({
+          consultation: consultation._id,
+          status: { $in: ['pending', 'ongoing'] },
+        });
+
+        if (!session) {
+          await Consultation.findByIdAndUpdate(consultation._id, {
+            status: 'expired',
+          });
+          // Notify both parties
+          await NotificationService.sendNotification({
+            user: consultation.user.toString(),
+            title: 'Consultation Expired',
+            message: 'Your scheduled consultation has expired because it was not started within the grace period.',
+            type: 'CONSULTATION_EXPIRED',
+            relatedBooking: consultation._id.toString(),
+          });
+          logger.info(`Expired scheduled consultation: ${consultation._id}`);
+        }
+      }
+    } catch (error) {
+      logger.error('Cron job failed: expireScheduledConsultations', error);
     }
   });
 };

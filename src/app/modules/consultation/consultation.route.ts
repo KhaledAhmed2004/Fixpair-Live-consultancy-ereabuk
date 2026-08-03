@@ -47,16 +47,16 @@ router.get(
 
 // Consultant: Manage unavailable slots
 router.post(
-  '/availability',
+  '/unavailability',
   auth(USER_ROLES.CONSULTANT),
-  validateRequest(ConsultationValidation.setAvailabilityZodSchema),
-  ConsultationController.setAvailability,
+  validateRequest(ConsultationValidation.setUnavailabilityZodSchema),
+  ConsultationController.setUnavailability,
 );
 
 router.get(
-  '/my-availability',
+  '/unavailability',
   auth(USER_ROLES.CONSULTANT),
-  ConsultationController.getMyAvailability,
+  ConsultationController.getMyUnavailability,
 );
 
 // User: View unavailable and booked slots for a consultant

@@ -22,7 +22,7 @@ const startTranscription = async (consultationId: string) => {
 
   // Idempotency: if already running (e.g. auto-started by joinSession and
   // frontend also calls /start), skip creating a second agent.
-  if (session.isTranscriptionActive && session.sttTaskId) {
+  if (['starting', 'active'].includes(session.transcriptionStatus as string) && session.sttTaskId) {
     return { agentId: session.sttTaskId };
   }
 
@@ -36,7 +36,7 @@ const startTranscription = async (consultationId: string) => {
   await VideoSession.findByIdAndUpdate(session._id, {
     $set: {
       sttTaskId: agentId,
-      isTranscriptionActive: true,
+      transcriptionStatus: 'starting',
     },
   });
 
@@ -46,16 +46,26 @@ const startTranscription = async (consultationId: string) => {
 const stopTranscription = async (consultationId: string) => {
   const session = await VideoSession.findOne({ consultation: consultationId });
   if (!session || !session.sttTaskId) {
+    // Mark as stopped even if no agent was started
+    if (session) {
+      await VideoSession.findByIdAndUpdate(session._id, {
+        $set: { transcriptionStatus: 'stopped' },
+      });
+    }
     return;
   }
 
-  // 1. Stop transcription
-  await AgoraSttHelper.stopTranscription(session.sttTaskId);
+  try {
+    // 1. Stop transcription
+    await AgoraSttHelper.stopTranscription(session.sttTaskId);
+  } catch (e) {
+    console.error('Failed to stop Agora STT:', e);
+  }
 
   // 2. Update session
   await VideoSession.findByIdAndUpdate(session._id, {
     $set: {
-      isTranscriptionActive: false,
+      transcriptionStatus: 'stopped',
     },
   });
 };
@@ -90,6 +100,23 @@ const ingestTranscriptChunk = async (
       StatusCodes.FORBIDDEN,
       'You are not part of this session',
     );
+  }
+
+  // Grace period check: allow ingestion during ongoing, starting, active, or within 60s of stopping
+  const allowedTranscriptionStatuses = ['starting', 'active', 'stopping'];
+  
+  const isSessionOngoing = session.status === 'ongoing';
+  const isTranscriptionInProgress = allowedTranscriptionStatuses.includes(
+    session.transcriptionStatus as string
+  );
+  
+  // If transcription is 'stopped', check 60s grace period via session.endedAt
+  const isWithinGrace = session.transcriptionStatus === 'stopped' && session.endedAt
+    ? Date.now() - session.endedAt.getTime() < 60_000
+    : false;
+
+  if (!isSessionOngoing && !isTranscriptionInProgress && !isWithinGrace) {
+    throw new ApiError(StatusCodes.CONFLICT, 'Transcript ingestion is no longer active for this session');
   }
 
   const { uid, text, isFinal, timestamp } = chunk;
@@ -133,6 +160,11 @@ const ingestTranscriptChunk = async (
     });
 
     if (!exists) {
+      if (session.transcriptionStatus === 'starting') {
+        await VideoSession.findByIdAndUpdate(session._id, {
+          $set: { transcriptionStatus: 'active' },
+        });
+      }
       await Transcript.create({
         consultation: session.consultation,
         channelName: session.channelName,

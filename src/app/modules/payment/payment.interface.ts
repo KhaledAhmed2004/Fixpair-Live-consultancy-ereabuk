@@ -29,3 +29,14 @@ export type IInvoice = {
   status: 'paid' | 'unpaid' | 'failed';
   pdfUrl?: string;
 };
+
+export type IBillingTransaction = {
+  consultationId: Types.ObjectId;
+  billingMinute: number;
+  type: 'preauth' | 'charge' | 'adjustment' | 'refund';
+  amount: number; // Stored in integer minor units (e.g. cents)
+  status: 'pending' | 'processing' | 'succeeded' | 'failed' | 'unknown';
+  stripePaymentIntentId?: string;
+  idempotencyKey: string;
+  processingStartedAt?: Date;
+};

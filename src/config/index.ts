@@ -56,6 +56,7 @@ export default {
       retryAttempts: Number(process.env.PAYMENT_RETRY_ATTEMPTS) || 3,
       retryDelay: Number(process.env.PAYMENT_RETRY_DELAY_SECONDS) || 30,
       warningMinutes: Number(process.env.CONSULTATION_WARNING_MINUTES) || 5,
+      intervalMs: Number(process.env.BILLING_INTERVAL_MS) || 60000,
     },
   },
   fcm: {

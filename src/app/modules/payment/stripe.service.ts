@@ -32,19 +32,20 @@ const listCustomerPaymentMethods = async (customerId: string) => {
 const createCharge = async (
   customerId: string,
   paymentMethodId: string,
-  amount: number,
+  amount: number, // Must be integer minor units (e.g. cents)
   consultationId: string,
   userId: string,
+  idempotencyKey?: string,
 ) => {
   return await stripe.paymentIntents.create({
-    amount: Math.round(amount * 100), // convert to cents
+    amount: amount, 
     currency: 'usd',
     customer: customerId,
     payment_method: paymentMethodId,
     off_session: true,
     confirm: true,
     metadata: { consultationId, userId },
-  });
+  }, { idempotencyKey });
 };
 
 /**
@@ -54,12 +55,13 @@ const createCharge = async (
 const authorizePayment = async (
   customerId: string,
   paymentMethodId: string,
-  amount: number,
+  amount: number, // Must be integer minor units (e.g. cents)
   consultationId: string,
   userId: string,
+  idempotencyKey?: string,
 ) => {
   return await stripe.paymentIntents.create({
-    amount: Math.round(amount * 100),
+    amount: amount,
     currency: 'usd',
     customer: customerId,
     payment_method: paymentMethodId,
@@ -67,7 +69,7 @@ const authorizePayment = async (
     confirm: true,
     capture_method: 'manual', // This makes it an authorization
     metadata: { consultationId, userId },
-  });
+  }, { idempotencyKey });
 };
 
 /**
@@ -75,10 +77,10 @@ const authorizePayment = async (
  */
 const capturePayment = async (
   paymentIntentId: string,
-  amount: number
+  amount: number // Must be integer minor units (e.g. cents)
 ) => {
   return await stripe.paymentIntents.capture(paymentIntentId, {
-    amount_to_capture: Math.round(amount * 100),
+    amount_to_capture: amount,
   });
 };
 

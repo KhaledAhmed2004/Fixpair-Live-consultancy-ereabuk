@@ -18,21 +18,23 @@ export type IConsultation = {
   notes?: string;
   perMinuteRate: number;
   platformFee: number;
-  totalAmount: number;
+  finalSettledAmount: number;
+  preAuthIntentId?: string;
   authorizedAmount?: number;
   consumedAmount: number;
   remainingMinutes: number;
-  billingStatus: 'pending' | 'authorized' | 'charging' | 'failed' | 'completed';
-  terminationReason?: 'manual' | 'insufficient_funds' | 'force_terminated';
+  billingStatus: 'pending' | 'authorized' | 'active' | 'failed' | 'completed';
+  terminationReason: 'manual' | 'insufficient_funds' | 'force_terminated' | null;
   status:
     | 'pending'
+    | 'ongoing'
     | 'accepted'
     | 'rejected'
     | 'confirmed'
     | 'completed'
     | 'cancelled'
     | 'expired';
-  paymentStatus: 'pending' | 'paid' | 'failed';
+  paymentStatus: 'pending' | 'authorized' | 'paid' | 'failed';
   remindersSent?: {
     twentyFourHour: boolean;
     oneHour: boolean;
