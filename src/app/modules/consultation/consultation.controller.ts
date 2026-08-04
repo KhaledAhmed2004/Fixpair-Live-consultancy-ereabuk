@@ -139,6 +139,19 @@ const getConsultantTotalConsultations = catchAsync(
   },
 );
 
+const initiateCallback = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as any;
+  const { id } = req.params;
+  const result = await ConsultationService.initiateCallback(user, id);
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'Callback initiated successfully',
+    data: result,
+  });
+});
+
 export const ConsultationController = {
   setUnavailability,
   getMyUnavailability,
@@ -149,4 +162,5 @@ export const ConsultationController = {
   rescheduleBooking,
   cancelBooking,
   getConsultantTotalConsultations,
+  initiateCallback,
 };

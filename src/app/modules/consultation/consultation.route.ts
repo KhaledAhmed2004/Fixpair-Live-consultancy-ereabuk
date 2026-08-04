@@ -94,6 +94,13 @@ router.patch(
   ConsultationController.updateBookingStatus,
 );
 
+// Consultant: Initiate a callback
+router.post(
+  '/initiate-callback/:id',
+  auth(USER_ROLES.CONSULTANT, USER_ROLES.ADMIN),
+  ConsultationController.initiateCallback,
+);
+
 // User: Reschedule a booking
 router.patch(
   '/reschedule/:id',

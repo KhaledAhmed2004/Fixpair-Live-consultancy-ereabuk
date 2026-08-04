@@ -22,7 +22,7 @@ const startOfDay = (date: Date): Date => {
   return result;
 };
 
-const setUnavailability = async (user: JwtPayload, slots: ISlot[]) => {
+const setAvailability = async (user: JwtPayload, slots: ISlot[]) => {
   const consultantId = user.id;
 
   // 1. Validate slots are within the next 30 days
@@ -61,11 +61,11 @@ const setUnavailability = async (user: JwtPayload, slots: ISlot[]) => {
   return result;
 };
 
-const getMyUnavailability = async (user: JwtPayload) => {
+const getMyAvailability = async (user: JwtPayload) => {
   const consultantId = user.id;
 
   const availability = await Availability.findOne({ consultant: consultantId });
-  
+
   if (!availability) {
     return { slots: [] };
   }
@@ -88,9 +88,9 @@ const getAvailableSlots = async (consultantId: string, date?: string) => {
   if (date) {
     const targetDate = startOfDay(new Date(date));
     const nextDay = new Date(targetDate.getTime() + 24 * 60 * 60 * 1000);
-    
+
     filter.date = { $gte: targetDate, $lt: nextDay };
-    
+
     // Filter unavailableSlots for the specific date
     unavailableSlots = unavailableSlots.filter(s => {
       const sDate = new Date(s.date);
@@ -99,7 +99,7 @@ const getAvailableSlots = async (consultantId: string, date?: string) => {
   } else {
     const today = startOfDay(new Date());
     filter.date = { $gte: today };
-    
+
     // Optional: Only return upcoming unavailable slots
     unavailableSlots = unavailableSlots.filter(s => {
       return new Date(s.date) >= today;
@@ -236,6 +236,25 @@ const createBooking = async (
     if (notes) consultationData.notes = notes;
 
     const result = await Consultation.create(consultationData);
+
+    const client = await User.findById(userId).select('name');
+    const clientName = client?.name || 'A user';
+
+    await NotificationService.sendNotification({
+      user: consultantId,
+      title: 'New Consultation Request',
+      message: `${clientName} has requested a scheduled consultation for ${slotDate.toLocaleDateString()} at ${startTime}.`,
+      type: 'CONSULTATION_REQUEST',
+      relatedBooking: result._id.toString(),
+      idempotencyKey: `new_consultation_request_${result._id}`,
+      metadata: {
+        userName: clientName,
+        bookingType: 'scheduled',
+        date: slotDate.toLocaleDateString(),
+        time: startTime,
+      },
+    });
+
     return { consultation: result, session: null };
   } else if (bookingType === 'instant') {
     if (!consultant.activeStatus) {
@@ -244,19 +263,20 @@ const createBooking = async (
         'Consultant is currently unavailable for instant consultation.',
       );
     }
-    
-    // Check if the consultant is already in a call or ringing
-    const consultantBusy = await Consultation.findOne({
+
+    // Check for duplicate pending instant consultation
+    const existingPending = await Consultation.findOne({
+      user: new mongoose.Types.ObjectId(userId),
       consultant: new mongoose.Types.ObjectId(consultantId),
       bookingType: 'instant',
-      status: { $in: ['pending', 'ongoing'] }
+      status: 'pending',
     });
 
-    if (consultantBusy) {
-      if (consultantBusy.user.toString() === userId) {
-        throw new ApiError(StatusCodes.CONFLICT, 'You already have an ongoing call request with this consultant.');
-      }
-      throw new ApiError(StatusCodes.CONFLICT, 'Consultant is currently busy on another call.');
+    if (existingPending) {
+      throw new ApiError(
+        StatusCodes.CONFLICT,
+        'You already have an ongoing call request with this consultant.',
+      );
     }
 
     // Instant booking: starts as pending
@@ -272,9 +292,12 @@ const createBooking = async (
     if (notes) instantBookingData.notes = notes;
 
     const consultation = await Consultation.create(instantBookingData);
-    
+
     // Delegate to VideoSessionService to handle session creation, token, and signaling
-    const session = await VideoSessionService.createSession(user, consultation._id.toString());
+    const session = await VideoSessionService.createSession(
+      user,
+      consultation._id.toString(),
+    );
 
     return { consultation, session };
   } else if (bookingType === 'callback') {
@@ -669,6 +692,48 @@ const cancelBooking = async (
   }
 };
 
+const initiateCallback = async (user: JwtPayload, bookingId: string) => {
+  const consultation = await Consultation.findById(bookingId);
+  if (!consultation) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Consultation not found');
+  }
+
+  if (consultation.bookingType !== 'callback') {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'This booking is not a callback request',
+    );
+  }
+
+  if (consultation.status !== 'pending' && consultation.status !== 'confirmed') {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      `Cannot initiate callback for a booking with status: ${consultation.status}`,
+    );
+  }
+
+  if (consultation.consultant.toString() !== user.id) {
+    throw new ApiError(
+      StatusCodes.FORBIDDEN,
+      'You are not authorized to initiate this callback',
+    );
+  }
+
+  // Update status to confirmed if it was pending
+  if (consultation.status === 'pending') {
+    consultation.status = 'confirmed';
+    await consultation.save();
+  }
+
+  // Delegate to VideoSessionService to handle session creation, token, and signaling
+  const session = await VideoSessionService.createSession(
+    user,
+    consultation._id.toString(),
+  );
+
+  return { consultation, session };
+};
+
 const getConsultantTotalConsultations = async (consultantId: string) => {
   // Validate ObjectId
   if (!mongoose.Types.ObjectId.isValid(consultantId)) {
@@ -687,8 +752,7 @@ const getConsultantTotalConsultations = async (consultantId: string) => {
 };
 
 export const ConsultationService = {
-  setUnavailability,
-  getMyUnavailability,
+  setAvailability,
   getAvailableSlots,
   createBooking,
   getMyBookings,
@@ -696,4 +760,6 @@ export const ConsultationService = {
   getConsultantTotalConsultations,
   rescheduleBooking,
   cancelBooking,
+  getMyAvailability,
+  initiateCallback,
 };

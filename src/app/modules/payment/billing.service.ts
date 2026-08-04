@@ -80,7 +80,7 @@ const startBilling = async (consultationId: string) => {
         preAuthIntent = await StripeService.authorizePayment(
           user.stripeCustomerId,
           defaultMethod.methodId,
-          preAuthAmount,
+          Math.round(preAuthAmount * 100),
           consultationId,
           user._id.toString(),
           idempotencyKey
@@ -261,7 +261,7 @@ const attemptMinuteCharge = async (consultationId: string, minute: number, consu
           const pi = await StripeService.createCharge(
              user!.stripeCustomerId,
              defaultMethod!.methodId,
-             chargeAmount,
+             Math.round(chargeAmount * 100),
              consultationId,
              user!._id.toString(),
              idempotencyKey
@@ -353,7 +353,7 @@ const attemptReAuthorization = async (consultationId: string, consultation: any,
       newPreAuthIntent = await StripeService.authorizePayment(
         user.stripeCustomerId,
         paymentMethod.methodId,
-        newPreAuthAmount,
+        Math.round(newPreAuthAmount * 100),
         consultationId,
         user._id.toString(),
         idempotencyKey

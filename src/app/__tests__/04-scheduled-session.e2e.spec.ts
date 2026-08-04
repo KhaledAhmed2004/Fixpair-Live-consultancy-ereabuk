@@ -5,7 +5,7 @@ import { StatusCodes } from 'http-status-codes';
 import { logApi } from './testLogger';
 import { startTestDb, stopTestDb } from './helpers/setupTestDb';
 import { createTestUsers, TestUsers } from './helpers/createTestUsers';
-
+import { NotificationService } from '../modules/notification/notification.service';
 vi.setConfig({ testTimeout: 60000 });
 
 describe('Scheduled Session E2E Tests (Fixpair)', () => {
@@ -18,6 +18,7 @@ describe('Scheduled Session E2E Tests (Fixpair)', () => {
   beforeAll(async () => {
     await startTestDb();
     testUsers = await createTestUsers(app);
+    vi.spyOn(NotificationService, 'sendNotification').mockResolvedValue(undefined as any);
   });
 
   afterAll(async () => {
@@ -110,6 +111,10 @@ Then the consultation is created successfully with pending status
 
       expect(res.status).toBe(StatusCodes.CREATED);
       expect(res.body.success).toBe(true);
+      expect(NotificationService.sendNotification).toHaveBeenCalled();
+      
+      const notificationPayload = vi.mocked(NotificationService.sendNotification).mock.calls[0][0];
+      console.info('🛎️  [TEST LOG] Notification Sent to Consultant:\n', JSON.stringify(notificationPayload, null, 2));
 
       scheduledConsultationId = res.body.data.consultation._id;
     });

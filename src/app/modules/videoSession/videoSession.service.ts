@@ -20,9 +20,7 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Consultation not found');
   }
 
-  if (consultation.bookingType === 'callback') {
-    throw new ApiError(StatusCodes.BAD_REQUEST, 'Video sessions are not supported for callback consultations');
-  }
+
 
   // Verify that the user is part of the consultation
   if (
@@ -136,12 +134,7 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
   }
 
   const consultation = await Consultation.findById(session.consultation);
-  if (consultation && consultation.bookingType === 'callback') {
-    throw new ApiError(
-      StatusCodes.BAD_REQUEST,
-      'Video sessions are not supported for callback consultations',
-    );
-  }
+
 
   // Verify that the user is part of the session
   if (
