@@ -98,7 +98,7 @@ Reason: Time-based recovery is deterministic and immune to clock drift or partia
       await BillingService.recoverBilling();
       
       expect(StripeService.createCharge).toHaveBeenCalledTimes(4);
-      expect(StripeService.createCharge).toHaveBeenCalledWith('cus_test', 'pm_test', 2, currentConsultationId, 'user_id', expect.any(String));
+      expect(StripeService.createCharge).toHaveBeenCalledWith('cus_test', 'pm_test', 200, currentConsultationId, 'user_id', expect.any(String));
 
       logService('BillingService.recoverBilling', { missingIntervals: 4, amount: 2 }, { catchupChargesExecuted: 4 }, 'SERVICE-RECOVERY', 'System successfully recovers missed intervals');
     });

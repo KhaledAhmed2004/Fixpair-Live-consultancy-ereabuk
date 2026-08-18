@@ -84,7 +84,7 @@ Then my profile should be updated successfully
 `);
       const payload = {
         name: 'Updated Normal User',
-        consultancyType: 'lawyer',
+        consultancyType: '60d5ecb8b392d7211054a322', // lawyer
         experience: '5 years',
         languages: ['English', 'Spanish'],
         expertise: ['Corporate Law', 'Family Law'],
@@ -109,7 +109,7 @@ Then my profile should be updated successfully
       expect(res.body.success).toBe(true);
       
       expect(res.body.data.name).toBe(payload.name);
-      expect(res.body.data.consultancyType).toBe(payload.consultancyType);
+      expect(res.body.data.consultancyType._id.toString()).toBe(payload.consultancyType);
       expect(res.body.data.experience).toBe(payload.experience);
       expect(res.body.data.languages).toEqual(expect.arrayContaining(payload.languages));
       expect(res.body.data.expertise).toEqual(expect.arrayContaining(payload.expertise));
@@ -145,7 +145,7 @@ Then I should receive my profile with the updated fields
       expect(res.body.success).toBe(true);
       
       expect(res.body.data.name).toBe('Updated Normal User');
-      expect(res.body.data.consultancyType).toBe('lawyer');
+      expect(res.body.data.consultancyType.name).toBe('lawyer');
       expect(res.body.data.experience).toBe('5 years');
       expect(res.body.data.languages).toEqual(expect.arrayContaining(['English', 'Spanish']));
       expect(res.body.data.expertise).toEqual(expect.arrayContaining(['Corporate Law', 'Family Law']));
@@ -176,6 +176,7 @@ Then I should receive a paginated list of consultants
         .set('Authorization', `Bearer ${testUsers.normalUserToken}`);
 
       logApi('GET', '/api/v1/user/consultants?page=1&limit=10', { headers: { Authorization: 'Bearer ***' } }, res.body, 'GET-ALL-CONSULTANTS-LIST', 'User fetches the list of consultants');
+
 
       expect(res.status).toBe(StatusCodes.OK);
       expect(res.body.success).toBe(true);
@@ -222,14 +223,14 @@ So that I can find a specific type of professional like a lawyer
 Feature: Consultant Discovery
 
 Given I am logged in as a normal user
-When I send a GET request to fetch consultants with consultancyType=lawyer
-Then I should receive a filtered list of only lawyers
+When I send a GET request to fetch consultants with consultancyType ID
+Then I should receive a 200 OK response with the filtered list
 `);
       const res = await request(app)
-        .get('/api/v1/user/consultants?consultancyType=lawyer')
+        .get('/api/v1/user/consultants?consultancyType=60d5ecb8b392d7211054a322')
         .set('Authorization', `Bearer ${testUsers.normalUserToken}`);
 
-      logApi('GET', '/api/v1/user/consultants?consultancyType=lawyer', { headers: { Authorization: 'Bearer ***' } }, res.body, 'GET-CONSULTANTS-FILTER', 'User filters consultants by type');
+      logApi('GET', '/api/v1/user/consultants?consultancyType=60d5ecb8b392d7211054a322', { headers: { Authorization: 'Bearer ***' } }, res.body, 'GET-CONSULTANTS-FILTER', 'User filters consultants by type');
 
       expect(res.status).toBe(StatusCodes.OK);
       expect(res.body.success).toBe(true);

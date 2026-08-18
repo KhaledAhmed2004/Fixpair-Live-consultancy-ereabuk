@@ -67,6 +67,7 @@ Then I should receive an access token and a success response
   });
 
   describe('Admin User Management (Consultant Creation)', () => {
+
     it('should create a consultant account that is auto-verified (No OTP required)', async () => {
       console.info(`
 📝 USER STORY:
@@ -95,7 +96,7 @@ Then the user should be created successfully with verified status set to true
         email: newConsultantEmail,
         password: newConsultantPassword,
         role: USER_ROLES.CONSULTANT,
-        consultancyType: 'advisor',
+        consultancyType: '60d5ecb8b392d7211054a321', // advisor
         experience: '10 years',
         languages: ['English', 'French'],
         expertise: ['Business Strategy', 'Financial Planning'],

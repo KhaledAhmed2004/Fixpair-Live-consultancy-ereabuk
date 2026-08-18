@@ -12,13 +12,25 @@ app.use(Morgan.successHandler);
 app.use(Morgan.errorHandler);
 
 //body parser
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://ereabook-updated-work.vercel.app',
+      'https://www.ereabook-updated-work.vercel.app',
+    ],
+    credentials: true,
+  })
+);
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 //file retrieve
 app.use(express.static('uploads'));
+app.use('/public', express.static('public'));
+app.use(express.static('public'));
 
 //router
 app.use('/api/v1', router);

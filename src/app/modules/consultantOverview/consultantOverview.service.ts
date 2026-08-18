@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import mongoose from 'mongoose';
 import { Consultation } from '../consultation/consultation.model';
+import { Transaction } from '../payment/payment.model';
 import { Review } from '../review/review.model';
 import {
   IConsultantConsultationTrend,
@@ -70,6 +71,8 @@ const getDashboardSummary = async (
     previousTotalSessions,
     cancelled,
     previousCancelled,
+    earningsResult,
+    previousEarningsResult,
   ] = await Promise.all([
     Consultation.countDocuments({
       consultant,
@@ -97,13 +100,31 @@ const getDashboardSummary = async (
       status: 'cancelled',
       createdAt: { $lte: thirtyDaysAgo },
     }),
+    Transaction.aggregate([
+      { $match: { consultant, status: 'captured' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]),
+    Transaction.aggregate([
+      {
+        $match: {
+          consultant,
+          status: 'captured',
+          createdAt: { $lte: thirtyDaysAgo },
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]),
   ]);
+
+  const earnings = earningsResult[0]?.total || 0;
+  const previousEarnings = previousEarningsResult[0]?.total || 0;
 
   return {
     upcomingConsultations: toMetric(upcoming, previousUpcoming),
     completedConsultations: toMetric(completed, previousCompleted),
     totalSessions: toMetric(totalSessions, previousTotalSessions),
     cancelledConsultations: toMetric(cancelled, previousCancelled),
+    totalEarnings: toMetric(earnings, previousEarnings),
   };
 };
 
@@ -306,10 +327,38 @@ const getRecentFeedback = async (
   }));
 };
 
+import QueryBuilder from '../../builder/QueryBuilder';
+
+const getMyTransactions = async (
+  consultantId: string,
+  query: Record<string, unknown>,
+) => {
+  const transactionQuery = new QueryBuilder(
+    Transaction.find({ consultant: toObjectId(consultantId) }).populate([
+      { path: 'user', select: 'name image' },
+      { path: 'consultation' },
+    ]),
+    query,
+  )
+    .filter()
+    .sort()
+    .paginate()
+    .fields();
+
+  const result = await transactionQuery.modelQuery;
+  const meta = await transactionQuery.getPaginationInfo();
+
+  return {
+    meta,
+    result,
+  };
+};
+
 export const ConsultantOverviewService = {
   getDashboardSummary,
   getConsultationTrend,
   getMyRatings,
   getRecentBookings,
   getRecentFeedback,
+  getMyTransactions,
 };

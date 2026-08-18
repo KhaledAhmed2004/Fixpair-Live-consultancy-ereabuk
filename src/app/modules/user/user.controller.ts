@@ -68,6 +68,29 @@ const updateProfile = catchAsync(
   },
 );
 
+const updateUser = catchAsync(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { userId: id } = req.params;
+    let image = getSingleFilePath(req.files, 'image');
+
+    const data = {
+      ...req.body,
+    };
+    if (image) {
+      data.image = image;
+    }
+
+    const result = await UserService.updateUserToDB(id, data);
+
+    sendResponse(res, {
+      success: true,
+      statusCode: StatusCodes.OK,
+      message: 'User updated successfully',
+      data: result,
+    });
+  },
+);
+
 const deleteAccount = catchAsync(async (req: Request, res: Response) => {
   const user = req.user as any;
   await UserService.deleteAccountFromDB(user);
@@ -81,7 +104,7 @@ const deleteAccount = catchAsync(async (req: Request, res: Response) => {
 
 const deleteUser = catchAsync(async (req: Request, res: Response) => {
   const admin = req.user as any;
-  const { id } = req.params;
+  const { userId: id } = req.params;
   await UserService.deleteUserFromDB(admin.id, id);
 
   sendResponse(res, {
@@ -92,7 +115,7 @@ const deleteUser = catchAsync(async (req: Request, res: Response) => {
 });
 
 const getSingleUser = catchAsync(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { userId: id } = req.params;
   const result = await UserService.getSingleUserFromDB(id);
 
   sendResponse(res, {
@@ -152,6 +175,7 @@ export const UserController = {
   deleteAccount,
   deleteUser,
   getSingleUser,
+  updateUser,
   getConsultants,
   updateDeviceToken,
   toggleStatus,

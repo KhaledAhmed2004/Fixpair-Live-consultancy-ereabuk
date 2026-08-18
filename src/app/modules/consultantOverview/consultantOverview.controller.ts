@@ -88,10 +88,28 @@ const getRecentFeedback = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const getMyTransactions = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as JwtPayload;
+  const result = await ConsultantOverviewService.getMyTransactions(
+    user.id,
+    req.query,
+  );
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'Transactions retrieved successfully',
+    pagination: result.meta,
+    data: result.result,
+  });
+});
+
 export const ConsultantOverviewController = {
   getDashboardSummary,
   getConsultationTrend,
   getMyRatings,
   getRecentBookings,
   getRecentFeedback,
+  getMyTransactions,
 };
+

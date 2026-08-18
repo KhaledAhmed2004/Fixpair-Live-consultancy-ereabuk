@@ -241,22 +241,22 @@ And the consultant should receive an incoming-call socket event
     });
 
     it('should reject an instant booking from a different user when consultant is busy', async () => {
-      console.info(`
-🔌 ARCHITECTURAL DECISION RECORD (ADR)
+      // Create a second normal user to simulate a different user calling
+      const secondUserEmail = `user2_${Date.now()}@test.com`;
+      const secondUserPassword = 'UserPassword123!';
+      await User.create({
+        name: 'Second Normal User',
+        email: secondUserEmail,
+        password: secondUserPassword,
+        role: 'USER',
+        status: 'active',
+        verified: true,
+      });
 
-Title: Concurrent Instant Call Blocking (Busy Status)
-
-Decision:
-The system strictly prevents users from calling a consultant who is already actively ringing or engaged in a consultation.
-
-Reason:
-To prevent multiple overlapping instant sessions and ensure a consultant is only handling one live call at a time. A consultant is considered "busy" if they have an 'ongoing' consultation of ANY type, or an 'instant' consultation that is 'pending', 'accepted', or 'confirmed'. 
-Note: 'accepted' is automatically mapped to 'confirmed' by the backend logic, so 'confirmed' must be checked for instant calls to prevent a race condition before the video session starts.
-
-Delivery:
-- 409 Conflict if same user tries calling again: "You already have an ongoing call request"
-- 409 Conflict if different user tries calling: "Consultant is currently busy on another call"
-`);
+      const userLoginRes = await request(app)
+        .post('/api/v1/auth/login')
+        .send({ email: secondUserEmail, password: secondUserPassword });
+      const secondUserToken = userLoginRes.body?.data?.accessToken;
 
       const payload = {
         consultantId: testUsers.consultantId,
@@ -265,7 +265,7 @@ Delivery:
 
       const res = await request(app)
         .post('/api/v1/consultation/book')
-        .set('Authorization', `Bearer ${testUsers.adminToken}`) // using admin to simulate a different user calling
+        .set('Authorization', `Bearer ${secondUserToken}`)
         .send(payload);
 
       expect(res.status).toBe(StatusCodes.CONFLICT);

@@ -11,6 +11,7 @@ export interface TestUsers {
   consultantEmail: string;
   normalUserToken: string;
   normalUserEmail: string;
+  normalUserId: string;
 }
 
 export async function createTestUsers(app: Express): Promise<TestUsers> {
@@ -39,7 +40,7 @@ export async function createTestUsers(app: Express): Promise<TestUsers> {
     email: consultantEmail,
     password: consultantPassword,
     role: USER_ROLES.CONSULTANT,
-    consultancyType: 'advisor',
+    consultancyType: '60d5ecb8b392d7211054a321', // advisor
     experience: '10 years',
     languages: ['English', 'French'],
     expertise: ['Business Strategy', 'Financial Planning'],
@@ -52,7 +53,7 @@ export async function createTestUsers(app: Express): Promise<TestUsers> {
   const consultantId = consultant._id.toString();
 
   // Create a normal user
-  await User.create({
+  const normalUser = await User.create({
     name: 'Normal User',
     email: normalUserEmail,
     password: normalUserPassword,
@@ -60,6 +61,7 @@ export async function createTestUsers(app: Express): Promise<TestUsers> {
     status: 'active',
     verified: true,
   });
+  const normalUserId = normalUser._id.toString();
 
   // Login super admin
   const adminLoginRes = await request(app)
@@ -87,5 +89,6 @@ export async function createTestUsers(app: Express): Promise<TestUsers> {
     consultantEmail,
     normalUserToken,
     normalUserEmail,
+    normalUserId,
   };
 }

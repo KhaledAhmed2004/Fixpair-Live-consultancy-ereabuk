@@ -7,7 +7,7 @@ const createUserZodSchema = z.object({
     email: z.string({ required_error: 'Email is required' }),
     password: z.string({ required_error: 'Password is required' }),
     role: z.nativeEnum(USER_ROLES).optional(),
-    consultancyType: z.enum(['lawyer', 'advisor', 'doctor']).optional(),
+    consultancyType: z.string().regex(/^[0-9a-fA-F]{24}$/, { message: 'Invalid consultancy type ID' }).optional(),
     experience: z.string().optional(),
     languages: z.array(z.string()).optional(),
     expertise: z.array(z.string()).optional(),
@@ -16,6 +16,23 @@ const createUserZodSchema = z.object({
     activeStatus: z.boolean().optional(),
     profile: z.string().optional(),
   }),
+}).superRefine((data, ctx) => {
+  if (data.body.role === USER_ROLES.CONSULTANT) {
+    if (!data.body.consultancyType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Consultancy Type is required for consultants',
+        path: ['body', 'consultancyType'],
+      });
+    }
+    if (data.body.perMinuteRate === undefined || data.body.perMinuteRate === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Per Minute Rate is required for consultants',
+        path: ['body', 'perMinuteRate'],
+      });
+    }
+  }
 });
 
 const updateUserZodSchema = z.object({
@@ -23,7 +40,7 @@ const updateUserZodSchema = z.object({
   email: z.string().optional(),
   password: z.string().optional(),
   image: z.string().optional(),
-  consultancyType: z.enum(['lawyer', 'advisor', 'doctor']).optional(),
+  consultancyType: z.string().regex(/^[0-9a-fA-F]{24}$/, { message: 'Invalid consultancy type ID' }).optional(),
   experience: z.string().optional(),
   languages: z.array(z.string()).optional(),
   expertise: z.array(z.string()).optional(),

@@ -1,0 +1,11 @@
+{
+  "success": false,
+  "message": "jwt malformed",
+  "errorMessages": [
+    {
+      "path": "",
+      "message": "jwt malformed"
+    }
+  ],
+  "stack": "JsonWebTokenError: jwt malformed\n    at Object.module.exports [as verify] (C:\\Users\\Khaled\\Khaled Dask\\Backend\\Fixpair - Live consultancy (ereabuk)\\node_modules\\jsonwebtoken\\verify.js:70:17)\n    at Object.verifyToken (C:/Users/Khaled/Khaled Dask/Backend/Fixpair - Live consultancy (ereabuk)/src/helpers/jwtHelper.ts:14:14)\n    at C:/Users/Khaled/Khaled Dask/Backend/Fixpair - Live consultancy (ereabuk)/src/app/middlewares/auth.ts:31:36\n    at Layer.handle [as handle_request] (C:\\Users\\Khaled\\Khaled Dask\\Backend\\Fixpair - Live consultancy (ereabuk)\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (C:\\Users\\Khaled\\Khaled Dask\\Backend\\Fixpair - Live consultancy (ereabuk)\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (C:\\Users\\Khaled\\Khaled Dask\\Backend\\Fixpair - Live consultancy (ereabuk)\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (C:\\Users\\Khaled\\Khaled Dask\\Backend\\Fixpair - Live consultancy (ereabuk)\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at C:\\Users\\Khaled\\Khaled Dask\\Backend\\Fixpair - Live consultancy (ereabuk)\\node_modules\\express\\lib\\router\\index.js:284:15\n    at router.process_params (C:\\Users\\Khaled\\Khaled Dask\\Backend\\Fixpair - Live consultancy (ereabuk)\\node_modules\\express\\lib\\router\\index.js:346:12)\n    at next (C:\\Users\\Khaled\\Khaled Dask\\Backend\\Fixpair - Live consultancy (ereabuk)\\node_modules\\express\\lib\\router\\index.js:280:10)"
+}

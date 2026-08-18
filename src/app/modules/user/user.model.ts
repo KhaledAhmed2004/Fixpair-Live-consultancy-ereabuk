@@ -50,8 +50,8 @@ const userSchema = new Schema<IUser, UserModal>(
       sparse: true,
     },
     consultancyType: {
-      type: String,
-      enum: ['lawyer', 'advisor', 'doctor'],
+      type: Schema.Types.ObjectId,
+      ref: 'ConsultancyType',
       default: null,
     },
     experience: {

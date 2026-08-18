@@ -330,11 +330,18 @@ const getInvoiceDataFromDB = async (
     }
   }
 
-  const durationInSeconds =
-    (consultation.consumedAmount / consultation.perMinuteRate) * 60;
-  const billableMinutes = Math.ceil(
-    consultation.consumedAmount / consultation.perMinuteRate,
+  const actualConsumed = Math.max(
+    0,
+    consultation.consumedAmount - consultation.platformFee,
   );
+  const durationInSeconds =
+    consultation.perMinuteRate > 0
+      ? (actualConsumed / consultation.perMinuteRate) * 60
+      : 0;
+  const billableMinutes =
+    consultation.perMinuteRate > 0
+      ? Math.ceil(actualConsumed / consultation.perMinuteRate)
+      : 0;
 
   const invoiceData = {
     consultationId: consultation._id,
@@ -418,8 +425,9 @@ const finalizeInvoice = async (consultationId: string) => {
     duration = Math.ceil((Date.now() - session.startedAt.getTime()) / 60000);
   } else {
     console.warn(`[INVOICE] Missing startedAt for consultation ${consultationId}, deriving from consumedAmount`);
+    const actualConsumed = Math.max(0, consultation.consumedAmount - consultation.platformFee);
     duration = consultation.perMinuteRate > 0
-      ? Math.ceil(consultation.consumedAmount / consultation.perMinuteRate)
+      ? Math.ceil(actualConsumed / consultation.perMinuteRate)
       : 0;
   }
 

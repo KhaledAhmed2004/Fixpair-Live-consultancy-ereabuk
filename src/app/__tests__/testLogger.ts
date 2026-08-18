@@ -62,14 +62,14 @@ export function logApi(
 
   // Resolve path parameters (e.g., :userId -> actual value) and query parameters (e.g. ?type=received)
   let resolvedUrl = url;
-  if (requestData.params && typeof requestData.params === 'object') {
+  if (requestData?.params && typeof requestData.params === 'object') {
     for (const [key, value] of Object.entries(requestData.params)) {
       if (value !== undefined && value !== null) {
         resolvedUrl = resolvedUrl.replace(`:${key}`, String(value));
       }
     }
   }
-  if (requestData.query && typeof requestData.query === 'object' && Object.keys(requestData.query).length > 0) {
+  if (requestData?.query && typeof requestData.query === 'object' && Object.keys(requestData.query).length > 0) {
     const queryString = new URLSearchParams(requestData.query).toString();
     if (queryString) {
       resolvedUrl += `?${queryString}`;
@@ -85,16 +85,16 @@ export function logApi(
   
   // Normalize requestData: always show params, query, body even if empty/missing
   const normalizedRequest: any = {
-    params: requestData.params ?? {},
-    query: requestData.query ?? {},
-    body: requestData.body ?? {},
+    params: requestData?.params ?? {},
+    query: requestData?.query ?? {},
+    body: requestData?.body ?? {},
   };
 
-  if (requestData.headers && Object.keys(requestData.headers).length > 0) {
+  if (requestData?.headers && Object.keys(requestData.headers).length > 0) {
     normalizedRequest.headers = requestData.headers;
   }
 
-  if (requestData.files) {
+  if (requestData?.files) {
     normalizedRequest.files = requestData.files;
   }
 

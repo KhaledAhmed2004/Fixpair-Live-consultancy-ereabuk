@@ -4,6 +4,7 @@
 /* eslint-disable no-console */
 /* eslint-disable no-undef */
 import { StatusCodes } from 'http-status-codes';
+import QueryBuilder from '../../builder/QueryBuilder';
 import { JwtPayload } from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { RtcTokenBuilder, RtcRole } from 'agora-token';
@@ -247,7 +248,7 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
   return await VideoSession.findById(sessionId);
 };
 
-const getMySessions = async (user: JwtPayload) => {
+const getMySessions = async (user: JwtPayload, query: Record<string, unknown>) => {
   const filter: any = {};
   if (user.role === 'USER') {
     filter.user = user.id;
@@ -255,15 +256,21 @@ const getMySessions = async (user: JwtPayload) => {
     filter.consultant = user.id;
   }
 
-  const result = await VideoSession.find(filter)
-    .populate([
-      { path: 'user', select: 'name image avatar' },
-      { path: 'consultant', select: 'name image avatar' },
-      { path: 'consultation' },
-    ])
-    .sort({ createdAt: -1 });
+  const sessionQuery = new QueryBuilder(VideoSession.find(filter), query)
+    .filter()
+    .sort()
+    .paginate()
+    .fields();
 
-  return result;
+  const result = await sessionQuery.modelQuery.populate([
+    { path: 'user', select: 'name image avatar' },
+    { path: 'consultant', select: 'name image avatar' },
+    { path: 'consultation' },
+  ]);
+
+  const meta = await sessionQuery.getPaginationInfo();
+
+  return { meta, result };
 };
 
 const handleCallAction = async (

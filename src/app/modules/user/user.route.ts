@@ -57,6 +57,17 @@ router
     UserController.getAllUsers,
   )
   .post(
+    fileUploadHandler(),
+    (req: Request, res: Response, next: NextFunction) => {
+      if (req.body.data) {
+        try {
+          req.body = JSON.parse(req.body.data);
+        } catch (error) {
+          return next(error);
+        }
+      }
+      next();
+    },
     validateRequest(UserValidation.createUserZodSchema),
     UserController.createUser,
   );
@@ -86,7 +97,7 @@ router.patch(
 );
 
 router.get(
-  '/:id',
+  '/:userId',
   auth(
     USER_ROLES.SUPER_ADMIN,
     USER_ROLES.ADMIN,
@@ -96,8 +107,22 @@ router.get(
   UserController.getSingleUser,
 );
 
+router.patch(
+  '/:userId',
+  auth(USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN),
+  fileUploadHandler(),
+  (req: Request, res: Response, next: NextFunction) => {
+    if (req.body.data) {
+      req.body = UserValidation.updateUserZodSchema.parse(
+        JSON.parse(req.body.data),
+      );
+    }
+    return UserController.updateUser(req, res, next);
+  },
+);
+
 router.delete(
-  '/:id',
+  '/:userId',
   auth(USER_ROLES.SUPER_ADMIN, USER_ROLES.ADMIN),
   UserController.deleteUser,
 );

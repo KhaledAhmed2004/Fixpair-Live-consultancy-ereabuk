@@ -11,18 +11,19 @@ import QueryBuilder from '../../builder/QueryBuilder';
 import { IUser } from './user.interface';
 import { User } from './user.model';
 import { ReviewService } from '../review/review.service';
+import { ConsultantOverviewService } from '../consultantOverview/consultantOverview.service';
 import { cacheHelper } from '../../utils/cache';
+import { ConsultancyType } from '../consultancyType/consultancyType.model';
 
 const getAllUsersToDB = async (query: Record<string, unknown>) => {
   const userQuery = new QueryBuilder(
     User.find().select(
       '-authentication -password -paymentMethods -fcmTokens -stripeCustomerId -paypalPayerId',
-    ),
+    ).populate('consultancyType'),
     query,
   )
     .search(['name', 'email', 'contact'])
     .filter()
-    .sort()
     .paginate()
     .fields();
 
@@ -56,6 +57,13 @@ const createUserToDB = async (payload: Partial<IUser>): Promise<IUser> => {
   
   if (payload.role === USER_ROLES.CONSULTANT) {
     payload.verified = true;
+    
+    if (payload.consultancyType) {
+      const isExistType = await ConsultancyType.findOne({ _id: payload.consultancyType, status: 'active' });
+      if (!isExistType) {
+        throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or inactive consultancy type');
+      }
+    }
   }
 
   const createUser = await User.create(payload);
@@ -95,7 +103,7 @@ const getUserProfileFromDB = async (
   const { id } = user;
   const isExistUser = await User.findById(id).select(
     '-authentication -password -fcmTokens -stripeCustomerId -paypalPayerId',
-  );
+  ).populate('consultancyType');
   if (!isExistUser) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "User doesn't exist!");
   }
@@ -134,6 +142,13 @@ const updateProfileToDB = async (
     delete (payload as any)[field];
   });
 
+  if (payload.consultancyType) {
+    const isExistType = await ConsultancyType.findOne({ _id: payload.consultancyType, status: 'active' });
+    if (!isExistType) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or inactive consultancy type');
+    }
+  }
+
   //unlink file here
   if (payload.image) {
     if (isExistUser.image) {
@@ -145,7 +160,45 @@ const updateProfileToDB = async (
     new: true,
   }).select(
     '-authentication -password -fcmTokens -stripeCustomerId -paypalPayerId',
-  );
+  ).populate('consultancyType');
+
+  if (updateDoc) {
+    // Invalidate consultant related caches
+    cacheHelper.clearByPrefix('consultants:recommended');
+    cacheHelper.clearByPrefix(`consultants:list`);
+  }
+
+  return updateDoc;
+};
+
+const updateUserToDB = async (
+  id: string,
+  payload: Partial<IUser>,
+): Promise<Partial<IUser | null>> => {
+  const isExistUser = await User.findById(id);
+  if (!isExistUser) {
+    throw new ApiError(StatusCodes.NOT_FOUND, "User doesn't exist!");
+  }
+
+  if (payload.consultancyType) {
+    const isExistType = await ConsultancyType.findOne({ _id: payload.consultancyType, status: 'active' });
+    if (!isExistType) {
+      throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or inactive consultancy type');
+    }
+  }
+
+  //unlink file here
+  if (payload.image) {
+    if (isExistUser.image) {
+      unlinkFile(isExistUser.image);
+    }
+  }
+
+  const updateDoc = await User.findOneAndUpdate({ _id: id }, payload, {
+    new: true,
+  }).select(
+    '-authentication -password -fcmTokens -stripeCustomerId -paypalPayerId',
+  ).populate('consultancyType');
 
   if (updateDoc) {
     // Invalidate consultant related caches
@@ -217,7 +270,7 @@ const deleteUserFromDB = async (adminId: string, targetId: string) => {
 const getSingleUserFromDB = async (id: string): Promise<Partial<IUser>> => {
   const isExistUser = await User.findById(id).select(
     '-authentication -password -fcmTokens -stripeCustomerId -paypalPayerId',
-  );
+  ).populate('consultancyType');
   if (!isExistUser) {
     throw new ApiError(StatusCodes.NOT_FOUND, "User doesn't exist!");
   }
@@ -226,8 +279,40 @@ const getSingleUserFromDB = async (id: string): Promise<Partial<IUser>> => {
 
   // If user is a consultant, attach stats
   if (userObj.role === USER_ROLES.CONSULTANT) {
-    const stats = await ReviewService.getConsultantStats(id);
-    (userObj as any).stats = stats;
+    const [reviewStats, dashboardStats, reviewsResponse, trendResponse] = await Promise.all([
+      ReviewService.getConsultantStats(id),
+      ConsultantOverviewService.getDashboardSummary(id),
+      ReviewService.getReviewsByConsultant(id, { limit: '5', sort: '-createdAt' }),
+      ConsultantOverviewService.getConsultationTrend(id, 7) // Last 7 days for the chart
+    ]);
+
+    (userObj as any).stats = {
+      averageRating: reviewStats.avgRating,
+      ...dashboardStats
+    };
+
+    (userObj as any).reviews = reviewsResponse.result.map((r: any) => ({
+      _id: r._id,
+      name: r.user?.name || 'Anonymous',
+      rating: r.rating,
+      date: new Date(r.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
+      comment: r.comment
+    }));
+
+    (userObj as any).chartData = trendResponse.points.map(p => {
+      // p.date is usually "YYYY-MM-DD"
+      // p.label is like "15 Aug", we convert to "Aug 15"
+      const parts = p.label.split(' ');
+      const formattedDate = parts.length === 2 ? `${parts[1]} ${parts[0]}` : p.label;
+      
+      return {
+        rawDate: p.date, // Best practice: keep the raw date for sorting/filtering
+        date: formattedDate, // Display date for X-axis
+        upcoming: p.upcoming,
+        completed: p.completed,
+        cancelled: p.cancelled
+      };
+    });
   }
 
   return userObj;
@@ -268,12 +353,11 @@ const getConsultantsFromDB = async (query: Record<string, unknown>) => {
       status: 'active',
     }).select(
       'name image bio consultancyType experience languages expertise perMinuteRate currency activeStatus averageRating totalReviews createdAt updatedAt',
-    ),
+    ).populate('consultancyType'),
     queryData,
   )
     .search(['name', 'email', 'expertise'])
     .filter()
-    .sort()
     .paginate()
     .fields();
 
@@ -349,4 +433,5 @@ export const UserService = {
   getConsultantsFromDB,
   updateDeviceTokenToDB,
   toggleStatusInDB,
+  updateUserToDB,
 };

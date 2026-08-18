@@ -15,6 +15,7 @@ import config from '../../../config';
 import { NotificationService } from '../notification/notification.service';
 import { cacheHelper } from '../../utils/cache';
 import { VideoSessionService } from '../videoSession/videoSession.service';
+import { Review } from '../review/review.model';
 
 const startOfDay = (date: Date): Date => {
   const result = new Date(date);
@@ -22,7 +23,7 @@ const startOfDay = (date: Date): Date => {
   return result;
 };
 
-const setAvailability = async (user: JwtPayload, slots: ISlot[]) => {
+const setUnavailability = async (user: JwtPayload, slots: ISlot[]) => {
   const consultantId = user.id;
 
   // 1. Validate slots are within the next 30 days
@@ -61,7 +62,7 @@ const setAvailability = async (user: JwtPayload, slots: ISlot[]) => {
   return result;
 };
 
-const getMyAvailability = async (user: JwtPayload) => {
+const getMyUnavailability = async (user: JwtPayload) => {
   const consultantId = user.id;
 
   const availability = await Availability.findOne({ consultant: consultantId });
@@ -264,7 +265,7 @@ const createBooking = async (
       );
     }
 
-    // Check for duplicate pending instant consultation
+    // Check if the current user already has an ongoing request
     const existingPending = await Consultation.findOne({
       user: new mongoose.Types.ObjectId(userId),
       consultant: new mongoose.Types.ObjectId(consultantId),
@@ -276,6 +277,22 @@ const createBooking = async (
       throw new ApiError(
         StatusCodes.CONFLICT,
         'You already have an ongoing call request with this consultant.',
+      );
+    }
+
+    // Check if consultant is busy with anyone else
+    const busyConsultant = await Consultation.findOne({
+      consultant: new mongoose.Types.ObjectId(consultantId),
+      $or: [
+        { status: 'ongoing' },
+        { bookingType: 'instant', status: { $in: ['pending', 'accepted', 'confirmed'] } }
+      ]
+    });
+
+    if (busyConsultant) {
+      throw new ApiError(
+        StatusCodes.CONFLICT,
+        'Consultant is currently busy on another call',
       );
     }
 
@@ -346,12 +363,23 @@ const getMyBookings = async (
   // Ensure user and consultant fields are always selected for population
   bookingQuery.modelQuery.select('user consultant');
 
-  const result = await bookingQuery.modelQuery.populate([
+  const resultList = await bookingQuery.modelQuery.populate([
     { path: 'user', select: 'name image avatar email' },
-    { path: 'consultant', select: 'name image avatar email tags' },
+    { path: 'consultant', select: 'name image avatar email tags consultancyType' },
     { path: 'report', select: '_id pdfUrl createdAt' },
   ]);
   const meta = await bookingQuery.getPaginationInfo();
+
+  // Fetch reviews for these bookings to add isReviewed flag
+  const bookingIds = resultList.map(b => b._id);
+  const reviews = await Review.find({ consultation: { $in: bookingIds } }).select('consultation');
+  const reviewedBookingIds = new Set(reviews.map(r => r.consultation.toString()));
+
+  const result = resultList.map(b => {
+    const obj = b.toObject() as any;
+    obj.isReviewed = reviewedBookingIds.has(b._id.toString());
+    return obj;
+  });
 
   return { result, meta };
 };
@@ -752,7 +780,7 @@ const getConsultantTotalConsultations = async (consultantId: string) => {
 };
 
 export const ConsultationService = {
-  setAvailability,
+  setUnavailability,
   getAvailableSlots,
   createBooking,
   getMyBookings,
@@ -760,6 +788,6 @@ export const ConsultationService = {
   getConsultantTotalConsultations,
   rescheduleBooking,
   cancelBooking,
-  getMyAvailability,
+  getMyUnavailability,
   initiateCallback,
 };

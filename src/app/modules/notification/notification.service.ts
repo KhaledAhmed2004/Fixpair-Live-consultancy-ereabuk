@@ -5,6 +5,7 @@ import ApiError from '../../../errors/ApiError';
 import { Notification } from './notification.model';
 import { socketHelper } from '../../../helpers/socketHelper';
 import { NotificationHelper } from '../../../helpers/notification/notificationHelper';
+import { INotification } from './notification.interface';
 import { User } from '../user/user.model';
 import { logger } from '../../../shared/logger';
 import QueryBuilder from '../../builder/QueryBuilder';
@@ -16,11 +17,7 @@ const sendNotification = async (payload: {
   user: string;
   title: string;
   message: string;
-  type:
-    | 'CONSULTATION_STATUS'
-    | 'PAYMENT_SUCCESS'
-    | 'CONSULTATION_REMINDER'
-    | 'SYSTEM';
+  type: INotification['type'];
   relatedBooking?: string;
   idempotencyKey?: string;
   metadata?: Record<string, any>;

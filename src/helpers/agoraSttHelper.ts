@@ -67,9 +67,6 @@ const startTranscription = async (
           subBotToken: botToken,
           pubBotUid: '9001',
           pubBotToken: botToken,
-          // Explicitly subscribe to both speaker UIDs — without this the bot
-          // may only transcribe one participant by default.
-          subscribeAudioUids: ['1001', '2001'],
           // Push captions as gzip-compressed JSON (not Protobuf) so clients can
           // TextDecoder + JSON.parse. Agora default is Protobuf.
           enableJsonProtocol: true,

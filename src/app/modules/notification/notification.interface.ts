@@ -9,6 +9,8 @@ export type INotification = {
     | 'CONSULTATION_STATUS'
     | 'PAYMENT_SUCCESS'
     | 'CONSULTATION_REMINDER'
+    | 'CONSULTATION_REQUEST'
+    | 'CONSULTATION_EXPIRED'
     | 'SYSTEM';
   relatedBooking?: Types.ObjectId;
   read: boolean;

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable no-unused-vars */
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { USER_ROLES } from '../../../enums/user';
 
 export type IUser = {
@@ -14,7 +14,7 @@ export type IUser = {
   status: 'active' | 'blocked' | 'deleted';
   verified: boolean;
   firebaseUid?: string;
-  consultancyType?: 'lawyer' | 'advisor' | 'doctor';
+  consultancyType?: Types.ObjectId;
   experience?: string;
   languages?: string[];
   expertise?: string[];

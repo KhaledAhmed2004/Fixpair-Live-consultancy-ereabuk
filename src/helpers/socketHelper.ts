@@ -9,8 +9,10 @@ import config from '../config';
 import { Secret } from 'jsonwebtoken';
 import { VideoSession } from '../app/modules/videoSession/videoSession.model';
 import { User } from '../app/modules/user/user.model';
+import { Consultation } from '../app/modules/consultation/consultation.model';
 
 const userSocketMap = new Map<string, string>();
+const disconnectTimers = new Map<string, NodeJS.Timeout>();
 
 const socket = (io: Server) => {
   // Middleware for authentication
@@ -58,6 +60,12 @@ const socket = (io: Server) => {
       logger.info(
         colors.blue(`User connected: ${userId} (Socket: ${socket.id})`),
       );
+      
+      // Clear disconnect timer if user reconnects
+      if (disconnectTimers.has(userId)) {
+        clearTimeout(disconnectTimers.get(userId));
+        disconnectTimers.delete(userId);
+      }
     }
 
     // Join a consultation room so transcript:new events reach both participants
@@ -103,6 +111,54 @@ const socket = (io: Server) => {
       if (userId) {
         userSocketMap.delete(userId);
         logger.info(colors.red(`User disconnected: ${userId}`));
+
+        // Start a 3-minute grace period before cleaning up active sessions
+        const timer = setTimeout(async () => {
+          try {
+            // Check if user is still disconnected
+            if (!userSocketMap.has(userId)) {
+              logger.info(`Cleaning up stale sessions for disconnected user: ${userId}`);
+              
+              // Find ongoing sessions where this user is either user or consultant
+              const ongoingSessions = await VideoSession.find({
+                status: 'ongoing',
+                $or: [{ user: userId }, { consultant: userId }]
+              });
+
+              for (const session of ongoingSessions) {
+                const endedAt = new Date();
+                const duration = session.startedAt ? Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000) : 0;
+                
+                // End the video session
+                await VideoSession.findByIdAndUpdate(session._id, {
+                  status: 'cancelled',
+                  endedAt,
+                  duration,
+                  terminationReason: 'abnormal_disconnect'
+                });
+
+                // Cancel the consultation
+                await Consultation.findByIdAndUpdate(session.consultation, {
+                  status: 'cancelled',
+                  cancelledAt: endedAt,
+                  terminationReason: 'abnormal_disconnect'
+                });
+
+                // Emit to room that session was force ended
+                emitToRoom(`consultation:${session.consultation}`, 'consultation-auto-ended', {
+                  reason: 'abnormal_disconnect',
+                  message: 'Session ended automatically due to participant disconnection.'
+                });
+              }
+            }
+          } catch (error) {
+            logger.error(`Error during socket disconnect cleanup for user ${userId}:`, error);
+          } finally {
+            disconnectTimers.delete(userId);
+          }
+        }, 3 * 60 * 1000); // 3 minutes
+
+        disconnectTimers.set(userId, timer);
       }
     });
   });

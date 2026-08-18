@@ -45,13 +45,14 @@ const endSession = catchAsync(async (req: Request, res: Response) => {
 
 const getMySessions = catchAsync(async (req: Request, res: Response) => {
   const user = req.user as any;
-  const result = await VideoSessionService.getMySessions(user);
+  const result = await VideoSessionService.getMySessions(user, req.query);
 
   sendResponse(res, {
     success: true,
     statusCode: StatusCodes.OK,
     message: 'Video sessions retrieved successfully',
-    data: result,
+    pagination: result.meta,
+    data: result.result,
   });
 });
 

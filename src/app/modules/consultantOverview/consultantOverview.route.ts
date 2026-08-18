@@ -40,4 +40,10 @@ router.get(
   ConsultantOverviewController.getRecentFeedback,
 );
 
+router.get(
+  '/my-transactions',
+  auth(USER_ROLES.CONSULTANT),
+  ConsultantOverviewController.getMyTransactions,
+);
+
 export const ConsultantOverviewRoutes = router;

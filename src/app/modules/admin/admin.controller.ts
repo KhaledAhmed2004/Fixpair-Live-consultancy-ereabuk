@@ -16,13 +16,14 @@ const parseLimit = (value: unknown, fallback: number): number => {
 };
 
 const getDashboardSummary = catchAsync(async (req: Request, res: Response) => {
-  const result = await AdminService.getDashboardSummary();
+  const filter = (req.query.filter as string) || 'all_time';
+  const result = await AdminService.getDashboardSummary(filter as any);
 
   sendResponse(res, {
     success: true,
     statusCode: StatusCodes.OK,
     message: 'Dashboard summary retrieved successfully',
-    meta: { comparisonPeriod: '30d' },
+    meta: { comparisonPeriod: filter },
     data: result,
   });
 });

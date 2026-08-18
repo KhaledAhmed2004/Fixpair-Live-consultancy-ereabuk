@@ -93,10 +93,10 @@ And the billing status updates to active
 `);
       await BillingService.startBilling(currentConsultationId);
 
-      expect(StripeService.authorizePayment).toHaveBeenCalledWith(
+      expect(StripeService.authorizePayment).toHaveBeenNthCalledWith(1,
         'cus_test',
         'pm_test',
-        7, // platformFee (5) + perMinuteRate (2) * minMinutes (1)
+        700, // platformFee (5) + perMinuteRate (2) * minMinutes (1) -> 700 cents
         currentConsultationId,
         'user_id',
         `preauth_${currentConsultationId}_gen_1`
@@ -142,7 +142,7 @@ And records a captured Transaction
       expect(StripeService.createCharge).toHaveBeenCalledWith(
         'cus_test',
         'pm_test',
-        7, // platformFee (5) + perMinuteRate (2)
+        700, // platformFee (5) + perMinuteRate (2) -> 700 cents
         currentConsultationId,
         'user_id',
         `charge_${currentConsultationId}_min_1`
@@ -189,7 +189,7 @@ And records a captured Transaction
       expect(StripeService.createCharge).toHaveBeenLastCalledWith(
         'cus_test',
         'pm_test',
-        2, // Only perMinuteRate
+        200, // Only perMinuteRate -> 200 cents
         currentConsultationId,
         'user_id',
         `charge_${currentConsultationId}_min_2`

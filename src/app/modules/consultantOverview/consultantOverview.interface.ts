@@ -11,6 +11,7 @@ export type IConsultantDashboardSummary = {
   completedConsultations: IDashboardMetric;
   totalSessions: IDashboardMetric;
   cancelledConsultations: IDashboardMetric;
+  totalEarnings: IDashboardMetric;
 };
 
 export type TrendDays = 7 | 30;

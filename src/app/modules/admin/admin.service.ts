@@ -107,9 +107,60 @@ const resolveScheduledAt = (consultation: {
   return consultation.createdAt ? new Date(consultation.createdAt) : new Date();
 };
 
-const getDashboardSummary = async (): Promise<IDashboardSummary> => {
+export type DashboardFilter = 'today' | 'this_week' | 'this_month' | 'this_year' | 'all_time';
+
+const getDashboardSummary = async (filter: DashboardFilter = 'all_time'): Promise<IDashboardSummary> => {
   const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  
+  let cpStart: Date | undefined;
+  const cpEnd = now;
+  let ppStart: Date | undefined;
+  let ppEnd: Date | undefined;
+
+  switch (filter) {
+    case 'today':
+      cpStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      ppStart = new Date(cpStart.getTime() - 24 * 60 * 60 * 1000);
+      ppEnd = cpStart;
+      break;
+    case 'this_week':
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      cpStart = new Date(now.getFullYear(), now.getMonth(), diff);
+      cpStart.setHours(0, 0, 0, 0);
+      ppStart = new Date(cpStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+      ppEnd = cpStart;
+      break;
+    case 'this_month':
+      cpStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      ppStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      ppEnd = cpStart;
+      break;
+    case 'this_year':
+      cpStart = new Date(now.getFullYear(), 0, 1);
+      ppStart = new Date(now.getFullYear() - 1, 0, 1);
+      ppEnd = cpStart;
+      break;
+    case 'all_time':
+    default:
+      cpStart = undefined;
+      ppStart = undefined;
+      ppEnd = undefined;
+      break;
+  }
+
+  const buildQuery = (baseQuery: any, start?: Date, end?: Date) => {
+    const query = { ...baseQuery };
+    if (start || end) {
+      query.createdAt = {};
+      if (start) query.createdAt.$gte = start;
+      if (end) query.createdAt.$lte = end;
+    }
+    return query;
+  };
+
+  const currentMatch = buildQuery({}, cpStart, cpEnd);
+  const previousMatch = buildQuery({}, ppStart, ppEnd);
 
   const [
     totalUsers,
@@ -127,50 +178,38 @@ const getDashboardSummary = async (): Promise<IDashboardSummary> => {
     totalRevenueResult,
     previousTotalRevenueResult,
   ] = await Promise.all([
-    User.countDocuments({ role: USER_ROLES.USER, status: 'active' }),
-    User.countDocuments({
-      role: USER_ROLES.USER,
-      status: 'active',
-      createdAt: { $lte: thirtyDaysAgo },
-    }),
-    User.countDocuments({ role: USER_ROLES.CONSULTANT, status: 'active' }),
-    User.countDocuments({
-      role: USER_ROLES.CONSULTANT,
-      status: 'active',
-      createdAt: { $lte: thirtyDaysAgo },
-    }),
-    Consultation.countDocuments(),
-    Consultation.countDocuments({ createdAt: { $lte: thirtyDaysAgo } }),
-    Consultation.countDocuments({ status: 'completed' }),
-    Consultation.countDocuments({
-      status: 'completed',
-      createdAt: { $lte: thirtyDaysAgo },
-    }),
-    Consultation.countDocuments({ status: 'cancelled' }),
-    Consultation.countDocuments({
-      status: 'cancelled',
-      createdAt: { $lte: thirtyDaysAgo },
-    }),
+    User.countDocuments(buildQuery({ role: USER_ROLES.USER, status: 'active' }, cpStart, cpEnd)),
+    ppEnd ? User.countDocuments(buildQuery({ role: USER_ROLES.USER, status: 'active' }, ppStart, ppEnd)) : Promise.resolve(0),
+
+    User.countDocuments(buildQuery({ role: USER_ROLES.CONSULTANT, status: 'active' }, cpStart, cpEnd)),
+    ppEnd ? User.countDocuments(buildQuery({ role: USER_ROLES.CONSULTANT, status: 'active' }, ppStart, ppEnd)) : Promise.resolve(0),
+
+    Consultation.countDocuments(buildQuery({}, cpStart, cpEnd)),
+    ppEnd ? Consultation.countDocuments(buildQuery({}, ppStart, ppEnd)) : Promise.resolve(0),
+
+    Consultation.countDocuments(buildQuery({ status: 'completed' }, cpStart, cpEnd)),
+    ppEnd ? Consultation.countDocuments(buildQuery({ status: 'completed' }, ppStart, ppEnd)) : Promise.resolve(0),
+
+    Consultation.countDocuments(buildQuery({ status: 'cancelled' }, cpStart, cpEnd)),
+    ppEnd ? Consultation.countDocuments(buildQuery({ status: 'cancelled' }, ppStart, ppEnd)) : Promise.resolve(0),
+
     Review.aggregate([
+      ...(Object.keys(currentMatch).length ? [{ $match: currentMatch }] : []),
       { $group: { _id: null, averageRating: { $avg: '$rating' } } },
     ]),
-    Review.aggregate([
-      { $match: { createdAt: { $lte: thirtyDaysAgo } } },
+    ppEnd ? Review.aggregate([
+      ...(Object.keys(previousMatch).length ? [{ $match: previousMatch }] : []),
       { $group: { _id: null, averageRating: { $avg: '$rating' } } },
-    ]),
+    ]) : Promise.resolve([]),
+
     Transaction.aggregate([
-      { $match: { status: 'captured' } },
+      { $match: buildQuery({ status: 'captured' }, cpStart, cpEnd) },
       { $group: { _id: null, total: { $sum: '$amount' } } },
     ]),
-    Transaction.aggregate([
-      {
-        $match: {
-          status: 'captured',
-          createdAt: { $lte: thirtyDaysAgo },
-        },
-      },
+    ppEnd ? Transaction.aggregate([
+      { $match: buildQuery({ status: 'captured' }, ppStart, ppEnd) },
       { $group: { _id: null, total: { $sum: '$amount' } } },
-    ]),
+    ]) : Promise.resolve([]),
   ]);
 
   const currentAvg =
