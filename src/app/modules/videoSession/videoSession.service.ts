@@ -82,6 +82,17 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
   const recipient = await User.findById(recipientId);
   if (!recipient) return { ...result.toObject(), uid };
 
+  // Fetch consultant details for the FCM payload
+  const consultantDetails = await User.findById(consultation.consultant);
+  const consultantName = consultantDetails?.name || 'Consultant';
+  
+  let consultantAvatar = consultantDetails?.image || consultantDetails?.avatar || '';
+  if (consultantAvatar && !consultantAvatar.startsWith('http')) {
+    // Convert relative path to full URL
+    const baseUrl = process.env.BASE_URL || 'https://nayem5000.binarybards.online';
+    consultantAvatar = `${baseUrl}${consultantAvatar.startsWith('/') ? '' : '/'}${consultantAvatar}`;
+  }
+
   // Generate a token specifically for the recipient
   const recipientUid = recipient.role === 'USER' ? 1001 : 2001;
   const recipientToken = generateAgoraToken(channelName, recipientUid);
@@ -93,6 +104,9 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
     appId: config.agora.appId,
     token: recipientToken, // Send the recipient's specific token
     channelName: result.channelName,
+    bookingId: consultationId,
+    consultantName: consultantName,
+    consultantAvatar: consultantAvatar,
   };
 
   if (recipient.role === 'CONSULTANT') {

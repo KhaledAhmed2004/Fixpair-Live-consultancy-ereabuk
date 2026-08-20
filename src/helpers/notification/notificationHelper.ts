@@ -57,22 +57,28 @@ const sendPushNotification = async (
     return null;
   }
 
+  const isIncomingCall = data.type === 'INCOMING_CALL';
+
   const message: admin.messaging.MulticastMessage = {
     tokens: tokenList,
-    notification: {
-      title: data.title || 'Notification',
-      body: data.body || '',
-    },
+    ...(isIncomingCall ? {} : {
+      notification: {
+        title: data.title || 'Notification',
+        body: data.body || '',
+      }
+    }),
     data: {
       ...data,
       click_action: 'FLUTTER_NOTIFICATION_CLICK',
     },
     android: {
       priority: 'high',
-      notification: {
-        channelId: 'default',
-        sound: 'default',
-      },
+      ...(isIncomingCall ? {} : {
+        notification: {
+          channelId: 'default',
+          sound: 'default',
+        }
+      }),
     },
     apns: {
       payload: {
