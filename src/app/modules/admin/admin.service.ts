@@ -580,12 +580,48 @@ const getAllTransactions = async (query: Record<string, unknown>) => {
     .paginate()
     .fields();
 
-  const result = await transactionQuery.modelQuery;
+  const result = await transactionQuery.modelQuery.lean();
   const meta = await transactionQuery.getPaginationInfo();
+
+  const consultationIds = result
+    .map((tx: any) => tx.consultation?._id)
+    .filter(Boolean);
+
+  const videoSessions = await VideoSession.find({
+    consultation: { $in: consultationIds },
+  }).lean();
+
+  const videoSessionMap = new Map();
+  videoSessions.forEach((session: any) => {
+    videoSessionMap.set(String(session.consultation), session);
+  });
+
+  const mappedResult = result.map((tx: any) => {
+    let billedDuration = 0;
+    if (tx.consultation && tx.consultation.perMinuteRate > 0) {
+      const consumed = tx.consultation.consumedAmount || 0;
+      const fee = tx.consultation.platformFee || 0;
+      if (consumed >= fee) {
+        billedDuration = Math.round((consumed - fee) / tx.consultation.perMinuteRate);
+      }
+    }
+
+    const session = tx.consultation ? videoSessionMap.get(String(tx.consultation._id)) : null;
+    let actualDuration = 0;
+    if (session) {
+      actualDuration = session.duration || 0;
+    }
+
+    return {
+      ...tx,
+      billedDuration,
+      actualDuration,
+    };
+  });
 
   return {
     meta,
-    result,
+    result: mappedResult,
   };
 };
 
