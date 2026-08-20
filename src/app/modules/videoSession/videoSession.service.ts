@@ -252,7 +252,16 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
     const client = (updatedConsultation.user as any)?.name || 'Client';
     const consultant = (updatedConsultation.consultant as any)?.name || 'Consultant';
     const finalAmount = updatedConsultation.consumedAmount || 0;
-    const finalDurationMins = Math.round(duration / 60);
+    
+    let finalDurationMins = 0;
+    if (updatedConsultation.perMinuteRate > 0) {
+      const fee = updatedConsultation.platformFee || 0;
+      if (finalAmount >= fee) {
+        finalDurationMins = Math.round((finalAmount - fee) / updatedConsultation.perMinuteRate);
+      }
+    } else {
+      finalDurationMins = Math.max(1, Math.round(duration / 60)); // minimum 1 min if fallback
+    }
 
     await NotificationService.notifyAdmins({
       title: 'Consultation Completed',
