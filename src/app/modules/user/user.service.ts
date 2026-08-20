@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { StatusCodes } from 'http-status-codes';
+import mongoose from 'mongoose';
 import { JwtPayload } from 'jsonwebtoken';
 import { USER_ROLES } from '../../../enums/user';
 import ApiError from '../../../errors/ApiError';
@@ -345,6 +346,15 @@ const getConsultantsFromDB = async (query: Record<string, unknown>) => {
   if (queryData.minRating !== undefined) {
     queryData.averageRating = { $gte: Number(queryData.minRating) };
     delete queryData.minRating;
+  }
+
+  if (queryData.consultancyType && !mongoose.Types.ObjectId.isValid(queryData.consultancyType as string)) {
+    const typeDoc = await ConsultancyType.findOne({ name: { $regex: new RegExp(`^${queryData.consultancyType}$`, 'i') } });
+    if (typeDoc) {
+      queryData.consultancyType = typeDoc._id;
+    } else {
+      queryData.consultancyType = new mongoose.Types.ObjectId();
+    }
   }
 
   const consultantQuery = new QueryBuilder(
