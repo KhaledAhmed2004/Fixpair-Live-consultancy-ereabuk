@@ -15,6 +15,7 @@ import { ReviewService } from '../review/review.service';
 import { ConsultantOverviewService } from '../consultantOverview/consultantOverview.service';
 import { cacheHelper } from '../../utils/cache';
 import { ConsultancyType } from '../consultancyType/consultancyType.model';
+import { NotificationService } from '../notification/notification.service';
 
 const getAllUsersToDB = async (query: Record<string, unknown>) => {
   const userQuery = new QueryBuilder(
@@ -70,6 +71,19 @@ const createUserToDB = async (payload: Partial<IUser>): Promise<IUser> => {
   const createUser = await User.create(payload);
   if (!createUser) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Failed to create user');
+  }
+
+  if (payload.role === USER_ROLES.CONSULTANT) {
+    // Notify admins about the new consultant registration
+    await NotificationService.notifyAdmins({
+      title: 'New Consultant Registration',
+      message: `${createUser.name} has registered as a Consultant.`,
+      type: 'NEW_CONSULTANT_REGISTERED',
+      metadata: {
+        consultantId: createUser._id.toString(),
+        name: createUser.name,
+      },
+    });
   }
 
   if (payload.role !== USER_ROLES.CONSULTANT) {

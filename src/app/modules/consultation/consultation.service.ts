@@ -245,7 +245,7 @@ const createBooking = async (
       user: consultantId,
       title: 'New Consultation Request',
       message: `${clientName} has requested a scheduled consultation for ${slotDate.toLocaleDateString()} at ${startTime}.`,
-      type: 'CONSULTATION_REQUEST',
+      type: 'NEW_BOOKING_REQUEST',
       relatedBooking: result._id.toString(),
       idempotencyKey: `new_consultation_request_${result._id}`,
       metadata: {
@@ -310,6 +310,21 @@ const createBooking = async (
 
     const consultation = await Consultation.create(instantBookingData);
 
+    const client = await User.findById(userId).select('name');
+    const clientName = client?.name || 'A user';
+
+    await NotificationService.sendNotification({
+      user: consultantId,
+      title: 'Incoming Instant Call',
+      message: `${clientName} is requesting an instant consultation right now.`,
+      type: 'INSTANT_CALL_REQUEST',
+      relatedBooking: consultation._id.toString(),
+      metadata: {
+        userName: clientName,
+        bookingType: 'instant',
+      },
+    });
+
     // Delegate to VideoSessionService to handle session creation, token, and signaling
     const session = await VideoSessionService.createSession(
       user,
@@ -339,6 +354,22 @@ const createBooking = async (
     if (notes) callbackBookingData.notes = notes;
 
     const result = await Consultation.create(callbackBookingData);
+
+    const client = await User.findById(userId).select('name');
+    const clientName = client?.name || 'A user';
+
+    await NotificationService.sendNotification({
+      user: consultantId,
+      title: 'New Callback Request',
+      message: `${clientName} has requested a callback (${preferredWindow}).`,
+      type: 'NEW_BOOKING_REQUEST',
+      relatedBooking: result._id.toString(),
+      metadata: {
+        userName: clientName,
+        bookingType: 'callback',
+      },
+    });
+
     return { consultation: result, session: null };
   }
 };
@@ -630,6 +661,22 @@ const rescheduleBooking = async (
 
     await booking.save({ session });
 
+    const client = await User.findById(userId).select('name');
+    const clientName = client?.name || 'A user';
+
+    await NotificationService.sendNotification({
+      user: booking.consultant.toString(),
+      title: 'Booking Rescheduled',
+      message: `${clientName} has requested to reschedule their consultation to ${newSlotDate.toLocaleDateString()} at ${startTime}.`,
+      type: 'BOOKING_RESCHEDULED',
+      relatedBooking: booking._id.toString(),
+      metadata: {
+        userName: clientName,
+        newDate: newSlotDate.toLocaleDateString(),
+        newTime: startTime,
+      },
+    });
+
     await session.commitTransaction();
     session.endSession();
 
@@ -712,6 +759,22 @@ const cancelBooking = async (
     }
 
     await booking.save({ session });
+
+    const client = await User.findById(userId).select('name');
+    const clientName = client?.name || 'A user';
+    const dateStr = booking.date ? new Date(booking.date).toLocaleDateString() : '';
+
+    await NotificationService.sendNotification({
+      user: booking.consultant.toString(),
+      title: 'Booking Cancelled',
+      message: `${clientName} has cancelled their consultation for ${dateStr}.`,
+      type: 'BOOKING_CANCELLED',
+      relatedBooking: booking._id.toString(),
+      metadata: {
+        userName: clientName,
+        bookingType: booking.bookingType,
+      },
+    });
 
     await session.commitTransaction();
     session.endSession();

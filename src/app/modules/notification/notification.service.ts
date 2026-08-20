@@ -154,8 +154,24 @@ const getUnreadCount = async (user: JwtPayload) => {
   return { count };
 };
 
+const notifyAdmins = async (payload: Omit<Parameters<typeof sendNotification>[0], 'user'>) => {
+  try {
+    const admins = await User.find({ role: { $in: ['ADMIN', 'SUPER_ADMIN'] } }).select('_id');
+    const promises = admins.map(admin => 
+      sendNotification({
+        ...payload,
+        user: admin._id.toString(),
+      })
+    );
+    await Promise.allSettled(promises);
+  } catch (error) {
+    logger.error('Error in notifyAdmins:', error);
+  }
+};
+
 export const NotificationService = {
   sendNotification,
+  notifyAdmins,
   getMyNotifications,
   markAsRead,
   markAllAsRead,
