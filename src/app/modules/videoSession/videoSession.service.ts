@@ -14,6 +14,7 @@ import { Consultation } from '../consultation/consultation.model';
 import { VideoSession } from './videoSession.model';
 import { IVideoSession } from './videoSession.interface';
 import { generateAgoraToken } from '../../../helpers/agoraTokenHelper';
+import { NotificationService } from '../notification/notification.service';
 
 const createSession = async (user: JwtPayload, consultationId: string) => {
   const consultation = await Consultation.findById(consultationId);
@@ -244,6 +245,28 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
   // Stop billing and generate invoice
   await BillingService.stopBilling(session.consultation.toString());
   await InvoiceService.finalizeInvoice(session.consultation.toString());
+
+  const updatedConsultation = await Consultation.findById(session.consultation).populate('user consultant');
+  
+  if (updatedConsultation) {
+    const client = (updatedConsultation.user as any)?.name || 'Client';
+    const consultant = (updatedConsultation.consultant as any)?.name || 'Consultant';
+    const finalAmount = updatedConsultation.consumedAmount || 0;
+    const finalDurationMins = Math.round(duration / 60);
+
+    await NotificationService.notifyAdmins({
+      title: 'Consultation Completed',
+      message: `Session ended between ${client} and ${consultant}. Duration: ${finalDurationMins} mins, Amount Generated: $${finalAmount}.`,
+      type: 'CONSULTATION_STATUS',
+      relatedBooking: updatedConsultation._id.toString(),
+      metadata: {
+        clientName: client,
+        consultantName: consultant,
+        durationMinutes: finalDurationMins,
+        amount: finalAmount,
+      }
+    });
+  }
 
   return await VideoSession.findById(sessionId);
 };
