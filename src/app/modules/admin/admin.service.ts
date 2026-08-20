@@ -100,7 +100,7 @@ const resolveScheduledAt = (consultation: {
     const base = new Date(consultation.date);
     const [hours, minutes] = consultation.startTime.split(':').map(Number);
     if (!Number.isNaN(hours)) {
-      base.setUTCHours(hours, Number.isNaN(minutes) ? 0 : minutes, 0, 0);
+      base.setHours(hours, Number.isNaN(minutes) ? 0 : minutes, 0, 0);
       return base;
     }
   }
