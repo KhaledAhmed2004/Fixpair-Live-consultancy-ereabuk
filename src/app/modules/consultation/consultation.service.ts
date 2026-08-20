@@ -365,7 +365,11 @@ const getMyBookings = async (
 
   const resultList = await bookingQuery.modelQuery.populate([
     { path: 'user', select: 'name image avatar email' },
-    { path: 'consultant', select: 'name image avatar email tags consultancyType' },
+    { 
+      path: 'consultant', 
+      select: 'name image avatar email tags consultancyType',
+      populate: { path: 'consultancyType' }
+    },
     { path: 'report', select: '_id pdfUrl createdAt' },
   ]);
   const meta = await bookingQuery.getPaginationInfo();
