@@ -21,10 +21,12 @@ import cryptoToken from '../../../util/cryptoToken';
 import generateOTP from '../../../util/generateOTP';
 import { ResetToken } from '../resetToken/resetToken.model';
 import { User } from '../user/user.model';
+import { cacheHelper } from '../../utils/cache';
+import { socketHelper } from '../../../helpers/socketHelper';
 
 //login
 const loginUserFromDB = async (payload: ILoginData) => {
-  const { email, password } = payload;
+  const { email, password, rememberMe = false } = payload;
   const isExistUser = await User.findOne({ email }).select('+password');
   if (!isExistUser) {
     throw new ApiError(StatusCodes.BAD_REQUEST, "User doesn't exist!");
@@ -65,26 +67,46 @@ const loginUserFromDB = async (payload: ILoginData) => {
     config.jwt.jwt_expire_in as string,
   );
 
+  // Set refresh token expiration based on rememberMe:
+  // rememberMe: true => long-lived (e.g. 90d from config)
+  // rememberMe: false => short-lived (1d)
+  const refreshExpireIn = rememberMe
+    ? (config.jwt.jwt_refresh_expire_in as string) || '90d'
+    : '1d';
+
   //create refresh token
   const refreshToken = jwtHelper.createToken(
     {
       id: isExistUser._id.toString(),
       role: isExistUser.role,
       email: isExistUser.email,
+      rememberMe,
     },
     config.jwt.jwt_refresh_secret as Secret,
-    config.jwt.jwt_refresh_expire_in as string,
+    refreshExpireIn,
   );
 
-  return { accessToken, refreshToken };
+  // If user is a CONSULTANT, mark activeStatus: true and broadcast presence
+  if (isExistUser.role === USER_ROLES.CONSULTANT) {
+    await User.findByIdAndUpdate(isExistUser._id, { activeStatus: true });
+    cacheHelper.clearByPrefix('consultants:recommended');
+    cacheHelper.clearByPrefix('consultants:list');
+    socketHelper.broadcastAll('consultant:status-changed', {
+      consultantId: isExistUser._id.toString(),
+      activeStatus: true,
+    });
+  }
+
+  return { accessToken, refreshToken, rememberMe };
 };
 
 //social login
 const socialLoginFromDB = async (payload: {
   idToken: string;
   provider: 'google' | 'apple';
+  rememberMe?: boolean;
 }) => {
-  const { idToken, provider } = payload;
+  const { idToken, provider, rememberMe = false } = payload;
 
   try {
     // Verify the Firebase ID Token
@@ -141,17 +163,32 @@ const socialLoginFromDB = async (payload: {
       config.jwt.jwt_expire_in as string,
     );
 
+    const refreshExpireIn = rememberMe
+      ? (config.jwt.jwt_refresh_expire_in as string) || '90d'
+      : '1d';
+
     const refreshToken = jwtHelper.createToken(
       {
         id: user._id.toString(),
         role: user.role,
         email: user.email,
+        rememberMe,
       },
       config.jwt.jwt_refresh_secret as Secret,
-      config.jwt.jwt_refresh_expire_in as string,
+      refreshExpireIn,
     );
 
-    return { accessToken, refreshToken };
+    if (user.role === USER_ROLES.CONSULTANT) {
+      await User.findByIdAndUpdate(user._id, { activeStatus: true });
+      cacheHelper.clearByPrefix('consultants:recommended');
+      cacheHelper.clearByPrefix('consultants:list');
+      socketHelper.broadcastAll('consultant:status-changed', {
+        consultantId: user._id.toString(),
+        activeStatus: true,
+      });
+    }
+
+    return { accessToken, refreshToken, rememberMe };
   } catch (error: any) {
     console.error('Firebase Token Verification Error Details:', {
       message: error.message,
@@ -459,6 +496,35 @@ const refreshToken = async (token: string) => {
   return { accessToken };
 };
 
+const logoutUserFromDB = async (
+  userId: string,
+  role: string,
+  deviceToken?: string,
+) => {
+  // If deviceToken is provided, remove it from fcmTokens
+  if (deviceToken) {
+    await User.findByIdAndUpdate(userId, {
+      $pull: { fcmTokens: deviceToken },
+    });
+  }
+
+  // If consultant logs out, mark activeStatus to false and notify clients
+  if (role === USER_ROLES.CONSULTANT) {
+    await User.findByIdAndUpdate(userId, { activeStatus: false });
+    cacheHelper.clearByPrefix('consultants:recommended');
+    cacheHelper.clearByPrefix('consultants:list');
+    socketHelper.broadcastAll('consultant:status-changed', {
+      consultantId: userId,
+      activeStatus: false,
+    });
+  }
+
+  // Disconnect active socket connections for this user
+  socketHelper.disconnectUser(userId);
+
+  return { message: 'Logged out successfully' };
+};
+
 export const AuthService = {
   verifyEmailToDB,
   loginUserFromDB,
@@ -468,4 +534,5 @@ export const AuthService = {
   changePasswordToDB,
   resendOtpToDB,
   refreshToken,
+  logoutUserFromDB,
 };

@@ -84,7 +84,7 @@ Then I should receive the summary data successfully
 
       expect(res.status).toBe(StatusCodes.OK);
       expect(res.body.success).toBe(true);
-      expect(res.body.meta).toEqual({ comparisonPeriod: '30d' });
+      expect(res.body.meta).toEqual({ comparisonPeriod: 'all_time' });
       expect(res.body.data).toBeDefined();
       expect(res.body.data.totalUsers).toMatchObject({
         value: expect.any(Number),

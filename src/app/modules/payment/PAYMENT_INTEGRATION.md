@@ -105,6 +105,34 @@ You can retrieve the list of saved cards to show the user which card is currentl
 
 ---
 
+### Step 5: Delete / Detach Payment Method
+
+Users can delete a saved payment method. If the deleted card was set as `isDefault: true`, the system automatically assigns the next available card as the new default card.
+
+**Primary Endpoint**: `DELETE /api/v1/payment/methods/:paymentMethodId`  
+**Alternative Fallback**: `POST /api/v1/payment/detach-method` (Body: `{ "paymentMethodId": "pm_..." }`)  
+**Headers**: `Authorization: Bearer <token>`  
+
+**Response**:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Payment method removed successfully",
+  "data": [
+    {
+      "provider": "stripe",
+      "methodId": "pm_remaining_123",
+      "last4": "4242",
+      "brand": "visa",
+      "isDefault": true
+    }
+  ]
+}
+```
+
+---
+
 ## 3. How Billing Works (For Reference)
 
 The backend handles billing in two phases:

@@ -55,9 +55,42 @@ const getTotalConsultations = catchAsync(async (req: Request, res: Response) => 
   });
 });
 
+const getAiSummary = catchAsync(async (req: Request, res: Response) => {
+  const { consultationId } = req.params;
+  const result = await ReportService.generateOrGetAiSummary(consultationId);
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'AI consultation summary retrieved successfully',
+    data: result,
+  });
+});
+
+const updateReport = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as any;
+  const { id } = req.params;
+  const result = await ReportService.updateReport(
+    user,
+    id,
+    req.body,
+    req.files,
+  );
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'Report updated and PDF regenerated successfully',
+    data: result,
+  });
+});
+
 export const ReportController = {
   createReport,
+  updateReport,
   getReports,
   getSingleReport,
   getTotalConsultations,
+  getAiSummary,
 };
+

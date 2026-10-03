@@ -17,11 +17,13 @@ import { IReport } from './report.interface';
 import { Report } from './report.model';
 import { VideoSession } from '../videoSession/videoSession.model';
 import { Transcript } from '../transcription/transcription.model';
+import { GeminiHelper } from '../../../helpers/geminiHelper';
+import { socketHelper } from '../../../helpers/socketHelper';
 
 const generateConsultationPDF = async (reportData: any): Promise<string> => {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument();
+      const doc = new PDFDocument({ margin: 36, size: 'A4', bufferPages: true });
       const fileName = `report-${reportData.consultationId}-${Date.now()}.pdf`;
       const uploadDir = path.join(process.cwd(), 'uploads', 'reports');
 
@@ -34,184 +36,602 @@ const generateConsultationPDF = async (reportData: any): Promise<string> => {
 
       doc.pipe(stream);
 
-      // --- Modern PDF Styling ---
-      const primaryColor = '#2c3e50';
-      const secondaryColor = '#34495e';
-      const accentColor = '#3498db';
-      const lightGray = '#f8f9fa';
+      // --- Color Palette from Reference Design ---
+      const textPrimary = '#0f172a'; // Deep slate / black
+      const textSecondary = '#64748b'; // Muted slate gray
+      const textDark = '#1e293b';
+      const blueAccent = '#2563eb'; // Vibrant Blue
+      const purpleAccent = '#7c3aed'; // Gemini Purple
+      const greenAccent = '#059669'; // Emerald Green
+      const orangeAccent = '#ea580c'; // Vibrant Orange
+      const borderLight = '#e2e8f0'; // Light gray border
+      const cardBgLight = '#f8fafc'; // Card inner bg
+      const aiCardBg = '#fbfaff'; // AI card soft lavender bg
+      const aiCardBorder = '#e0e7ff';
 
-      // Header Background
-      doc.rect(0, 0, 612, 120).fill('#f1f4f6');
+      const contentWidth = 523; // 595 - 72 (margins)
+      const leftMargin = 36;
 
-      // Title
+      const ensurePageSpace = (neededHeight: number) => {
+        if (doc.y + neededHeight > 780) {
+          doc.addPage();
+          doc.y = 36;
+        }
+      };
+
+      // ─── 1. Header (Brand Left / Service Log Right) ───
+      // Brand Logo & Subtitle
       doc
-        .fillColor(primaryColor)
-        .fontSize(24)
         .font('Helvetica-Bold')
-        .text('Consultation Summary Report', 50, 45);
+        .fontSize(22)
+        .fillColor(textPrimary)
+        .text('Fixpair', leftMargin, 36);
 
       doc
-        .fontSize(10)
-        .font('Helvetica')
-        .fillColor(secondaryColor)
-        .text('Confidential Consultation Record', 50, 75);
-
-      // Info Section
-      doc.roundedRect(50, 140, 512, 100, 5).strokeColor('#dee2e6').stroke();
-
-      doc.fillColor(primaryColor).font('Helvetica-Bold').fontSize(11);
-      doc.text('Date:', 70, 155);
-      doc.text('Client:', 70, 175);
-      doc.text('Consultant:', 70, 195);
-
-      doc.font('Helvetica').fillColor(secondaryColor);
-      doc.text(
-        reportData.date
-          ? new Date(reportData.date).toLocaleString()
-          : new Date().toLocaleString(),
-        150,
-        155,
-      );
-      doc.text(reportData.userName, 150, 175);
-      doc.text(reportData.consultantName, 150, 195);
-
-      if (reportData.duration) {
-        doc.fillColor(primaryColor).font('Helvetica-Bold');
-        doc.text('Duration:', 70, 215);
-        doc.font('Helvetica').fillColor(secondaryColor);
-        const minutes = Math.floor(reportData.duration / 60);
-        const seconds = reportData.duration % 60;
-        doc.text(`${minutes}m ${seconds}s`, 150, 215);
-      }
-
-      // Conversation History
-      doc.moveDown(4);
-      doc
-        .fillColor(accentColor)
         .font('Helvetica-Bold')
-        .fontSize(14)
-        .text('Conversation History');
-      doc
-        .moveTo(50, doc.y + 5)
-        .lineTo(562, doc.y + 5)
-        .strokeColor('#e9ecef')
-        .stroke();
-      doc.moveDown(1.5);
+        .fontSize(7.5)
+        .fillColor(blueAccent)
+        .text('YOUR PROFESSIONAL IN YOUR POCKET', leftMargin, 63);
 
-      doc
-        .fillColor(secondaryColor)
-        .font('Helvetica')
-        .fontSize(10)
-        .text(reportData.conversation || 'No conversation recorded', {
-          align: 'justify',
-          lineGap: 5,
-        });
-
-      // Consultant Notes
-      if (reportData.notes) {
-        doc.moveDown(2);
-        doc
-          .fillColor(accentColor)
-          .font('Helvetica-Bold')
-          .fontSize(14)
-          .text('Consultant Notes');
-        doc
-          .moveTo(50, doc.y + 5)
-          .lineTo(562, doc.y + 5)
-          .strokeColor('#e9ecef')
-          .stroke();
-        doc.moveDown(1.5);
-
-        doc
-          .fillColor(secondaryColor)
-          .font('Helvetica')
-          .fontSize(10)
-          .text(reportData.notes, {
-            lineGap: 3,
+      // Right Header: Service log, ID, Date
+      const formattedDate = reportData.date
+        ? new Date(reportData.date).toLocaleDateString('en-US', {
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
+          })
+        : new Date().toLocaleDateString('en-US', {
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
           });
-      }
 
-      // Shared Links
-      if (reportData.links && reportData.links.length > 0) {
-        doc.moveDown(2);
+      const callId = `rep_call_${String(reportData.consultationId).slice(-9)}`;
+
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(13)
+        .fillColor(textPrimary)
+        .text('Service log', leftMargin, 36, { align: 'right', width: contentWidth });
+
+      doc
+        .font('Helvetica')
+        .fontSize(8)
+        .fillColor(textSecondary)
+        .text(`ID:  ${callId}`, leftMargin, 52, { align: 'right', width: contentWidth });
+
+      doc
+        .font('Helvetica')
+        .fontSize(8)
+        .fillColor(textSecondary)
+        .text(`Date: ${formattedDate}`, leftMargin, 64, { align: 'right', width: contentWidth });
+
+      // ─── 2. Metadata Info Card (2x2 Grid) ───
+      const metaBoxY = 82;
+      const metaBoxHeight = 58;
+
+      doc
+        .roundedRect(leftMargin, metaBoxY, contentWidth, metaBoxHeight, 8)
+        .fillAndStroke('#ffffff', borderLight);
+
+      const colWidth = contentWidth / 4;
+      const durationSec = reportData.duration || 0;
+      const durMin = Math.floor(durationSec / 60);
+      const durSec = durationSec % 60;
+      const durationStr = `${durMin} min ${durSec} sec`;
+
+      // Col 1: Category
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(6.5)
+        .fillColor(textSecondary)
+        .text('CATEGORY', leftMargin + 16, metaBoxY + 12);
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(9.5)
+        .fillColor(textPrimary)
+        .text(reportData.bookingType || 'instant', leftMargin + 16, metaBoxY + 26);
+
+      // Col 2: Advisor
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(6.5)
+        .fillColor(textSecondary)
+        .text('ADVISOR', leftMargin + colWidth + 10, metaBoxY + 12);
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(9.5)
+        .fillColor(textPrimary)
+        .text(
+          reportData.consultantName || 'Advisor',
+          leftMargin + colWidth + 10,
+          metaBoxY + 26,
+          { width: colWidth - 15, ellipsis: true },
+        );
+
+      // Col 3: Conversation Duration
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(6.5)
+        .fillColor(textSecondary)
+        .text('CONVERSATION DURATION', leftMargin + colWidth * 2 + 5, metaBoxY + 12);
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(9.5)
+        .fillColor(textPrimary)
+        .text(durationStr, leftMargin + colWidth * 2 + 5, metaBoxY + 26);
+
+      // Col 4: Status
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(6.5)
+        .fillColor(textSecondary)
+        .text('STATUS', leftMargin + colWidth * 3 + 5, metaBoxY + 12);
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(9.5)
+        .fillColor(greenAccent)
+        .text('Successfully completed', leftMargin + colWidth * 3 + 5, metaBoxY + 26);
+
+      doc.y = metaBoxY + metaBoxHeight + 14;
+
+      // ─── Helper: Draw Section Header with Vertical Bar ───
+      const drawSectionHeader = (title: string, barColor: string) => {
+        ensurePageSpace(45);
+        const curY = doc.y;
         doc
-          .fillColor(accentColor)
+          .roundedRect(leftMargin, curY + 1, 3.5, 12, 1.5)
+          .fill(barColor);
+
+        doc
           .font('Helvetica-Bold')
-          .fontSize(14)
-          .text('Shared Resources');
-        doc
-          .moveTo(50, doc.y + 5)
-          .lineTo(562, doc.y + 5)
-          .strokeColor('#e9ecef')
-          .stroke();
-        doc.moveDown(1.5);
+          .fontSize(11)
+          .fillColor(textPrimary)
+          .text(title, leftMargin + 10, curY);
 
-        reportData.links.forEach((link: string) => {
-          doc
-            .fillColor(accentColor)
-            .fontSize(10)
-            .font('Helvetica')
-            .text(link, { link: link, underline: true });
-          doc.moveDown(0.5);
+        doc.y = curY + 18;
+      };
+
+      // ─── Helper: Draw Empty State Dashed Card ───
+      const drawEmptyStateCard = (message: string) => {
+        ensurePageSpace(40);
+        const cardY = doc.y;
+        doc
+          .roundedRect(leftMargin, cardY, contentWidth, 34, 6)
+          .dash(4, { space: 3 })
+          .strokeColor(borderLight)
+          .stroke()
+          .undash();
+
+        doc
+          .font('Helvetica-Oblique')
+          .fontSize(8.5)
+          .fillColor(textSecondary)
+          .text(message, leftMargin, cardY + 11, {
+            align: 'center',
+            width: contentWidth,
+          });
+
+        doc.y = cardY + 44;
+      };
+
+      // ─── 3. Gemini AI Summary Card ───
+      const summaryText = reportData.summary || reportData.aiSummary?.overview || 'No transcript recorded for this consultation.';
+      const keyPointsList =
+        (reportData.keyPoints && reportData.keyPoints.length > 0)
+          ? reportData.keyPoints
+          : reportData.aiSummary?.keyPoints || ['No dialogue chunks captured.'];
+
+      ensurePageSpace(160);
+      const aiCardStartY = doc.y;
+
+      // Calculate required heights for AI card
+      doc.font('Helvetica').fontSize(8.5);
+      const execTextHeight = doc.heightOfString(summaryText, { width: contentWidth - 36 });
+      const execBoxHeight = Math.max(34, execTextHeight + 16);
+
+      let keyPointsHeight = 0;
+      keyPointsList.forEach((pt: string) => {
+        keyPointsHeight += doc.heightOfString(pt, { width: contentWidth - 55 }) + 6;
+      });
+      const keyPointsBoxHeight = Math.max(34, keyPointsHeight + 14);
+
+      const totalAiCardHeight = 52 + 18 + execBoxHeight + 16 + keyPointsBoxHeight + 16;
+
+      // Draw Main AI Card Container
+      doc
+        .roundedRect(leftMargin, aiCardStartY, contentWidth, totalAiCardHeight, 10)
+        .fillAndStroke(aiCardBg, aiCardBorder);
+
+      // AI Header Icon: Purple Circle with crisp vector star
+      const starCx = leftMargin + 22;
+      const starCy = aiCardStartY + 24;
+      doc.circle(starCx, starCy, 12).fill(purpleAccent);
+
+      // Vector 4-point Sparkle in white
+      doc.save();
+      doc.moveTo(starCx, starCy - 6)
+        .lineTo(starCx + 1.8, starCy - 1.8)
+        .lineTo(starCx + 6, starCy)
+        .lineTo(starCx + 1.8, starCy + 1.8)
+        .lineTo(starCx, starCy + 6)
+        .lineTo(starCx - 1.8, starCy + 1.8)
+        .lineTo(starCx - 6, starCy)
+        .lineTo(starCx - 1.8, starCy - 1.8)
+        .closePath()
+        .fill('#ffffff');
+      doc.restore();
+
+      // AI Title (Model name badge omitted as requested)
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(11.5)
+        .fillColor('#1e1b4b')
+        .text('Gemini AI Summary', leftMargin + 42, aiCardStartY + 14);
+
+      // AI Subtitle
+      doc
+        .font('Helvetica')
+        .fontSize(7.5)
+        .fillColor(textSecondary)
+        .text('Auto-generated intelligence from live consultation transcription', leftMargin + 42, aiCardStartY + 29);
+
+      // AI Inner Subsection 1: Executive Summary (Clean vector document icon)
+      const execHeaderY = aiCardStartY + 50;
+
+      // Vector Doc Icon
+      doc
+        .roundedRect(leftMargin + 18, execHeaderY - 1, 8.5, 10.5, 1)
+        .strokeColor(purpleAccent)
+        .lineWidth(0.8)
+        .stroke();
+      doc
+        .moveTo(leftMargin + 20, execHeaderY + 2.5)
+        .lineTo(leftMargin + 24.5, execHeaderY + 2.5)
+        .stroke();
+      doc
+        .moveTo(leftMargin + 20, execHeaderY + 5.5)
+        .lineTo(leftMargin + 24.5, execHeaderY + 5.5)
+        .stroke();
+
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(8.5)
+        .fillColor(purpleAccent)
+        .text('Executive Summary', leftMargin + 31, execHeaderY);
+
+      const execBoxY = execHeaderY + 14;
+      doc
+        .roundedRect(leftMargin + 14, execBoxY, contentWidth - 28, execBoxHeight, 6)
+        .fillAndStroke('#ffffff', borderLight);
+
+      doc
+        .font('Helvetica')
+        .fontSize(8.5)
+        .fillColor(textDark)
+        .text(summaryText, leftMargin + 24, execBoxY + 8, {
+          width: contentWidth - 48,
+          lineGap: 2.5,
         });
+
+      // AI Inner Subsection 2: Key Discussion Points (Clean vector target/circle icon)
+      const pointsHeaderY = execBoxY + execBoxHeight + 12;
+
+      // Vector Target Icon
+      doc
+        .circle(leftMargin + 22, pointsHeaderY + 4, 3.5)
+        .strokeColor(greenAccent)
+        .lineWidth(0.8)
+        .stroke();
+      doc
+        .circle(leftMargin + 22, pointsHeaderY + 4, 1.5)
+        .fill(greenAccent);
+
+      doc
+        .font('Helvetica-Bold')
+        .fontSize(8.5)
+        .fillColor(greenAccent)
+        .text('Key Discussion Points', leftMargin + 31, pointsHeaderY);
+
+      const pointsBoxY = pointsHeaderY + 14;
+      doc
+        .roundedRect(leftMargin + 14, pointsBoxY, contentWidth - 28, keyPointsBoxHeight, 6)
+        .fillAndStroke('#ffffff', borderLight);
+
+      let currentPtY = pointsBoxY + 8;
+      keyPointsList.forEach((pt: string) => {
+        // Vector green dot bullet
+        doc.circle(leftMargin + 26, currentPtY + 4.5, 2).fill(greenAccent);
+
+        doc
+          .font('Helvetica')
+          .fontSize(8.5)
+          .fillColor(textDark)
+          .text(pt, leftMargin + 34, currentPtY, {
+            width: contentWidth - 68,
+            lineGap: 2.5,
+          });
+
+        const itemH = doc.heightOfString(pt, { width: contentWidth - 68 });
+        currentPtY += itemH + 6;
+      });
+
+      doc.y = aiCardStartY + totalAiCardHeight + 14;
+
+      // ─── 4. Steps Taken Section ───
+      drawSectionHeader('Steps taken', blueAccent);
+
+      const stepsList =
+        (reportData.stepsTaken && reportData.stepsTaken.length > 0)
+          ? reportData.stepsTaken
+          : reportData.aiSummary?.actionItems;
+
+      if (stepsList && stepsList.length > 0) {
+        ensurePageSpace(60);
+        const stepsBoxStartY = doc.y;
+
+        doc.font('Helvetica').fontSize(8.5);
+        let totalStepsH = 14;
+        stepsList.forEach((st: string) => {
+          totalStepsH += Math.max(22, doc.heightOfString(st, { width: contentWidth - 55 }) + 8);
+        });
+
+        doc
+          .roundedRect(leftMargin, stepsBoxStartY, contentWidth, totalStepsH, 8)
+          .fillAndStroke('#ffffff', borderLight);
+
+        let stepY = stepsBoxStartY + 10;
+        stepsList.forEach((step: string, idx: number) => {
+          // Number Pill
+          doc
+            .roundedRect(leftMargin + 14, stepY, 16, 16, 8)
+            .fill('#e0f2fe');
+
+          doc
+            .font('Helvetica-Bold')
+            .fontSize(7.5)
+            .fillColor(blueAccent)
+            .text(`${idx + 1}`, leftMargin + 14, stepY + 3.5, { align: 'center', width: 16 });
+
+          // Step Text
+          doc
+            .font('Helvetica')
+            .fontSize(8.5)
+            .fillColor(textDark)
+            .text(step, leftMargin + 38, stepY + 2.5, {
+              width: contentWidth - 55,
+              lineGap: 2,
+            });
+
+          const stepH = doc.heightOfString(step, { width: contentWidth - 55 });
+          stepY += Math.max(22, stepH + 8);
+        });
+
+        doc.y = stepsBoxStartY + totalStepsH + 14;
+      } else {
+        drawEmptyStateCard('No steps or action items were added for this consultation.');
       }
 
-      // Attached Images
-      if (reportData.images && reportData.images.length > 0) {
-        doc.moveDown(2);
-        doc
-          .fillColor(accentColor)
-          .font('Helvetica-Bold')
-          .fontSize(14)
-          .text('Attached Images');
-        doc
-          .moveTo(50, doc.y + 5)
-          .lineTo(562, doc.y + 5)
-          .strokeColor('#e9ecef')
-          .stroke();
-        doc.moveDown(1.5);
+      // ─── 5. Recommended Products & Tools Section ───
+      drawSectionHeader('Recommended Products & Tools', greenAccent);
 
-        reportData.images.forEach((imgUrl: string) => {
-          // Resolve local path from URL: /image/filename.jpg -> uploads/image/filename.jpg
+      if (
+        reportData.recommendedProducts &&
+        reportData.recommendedProducts.length > 0
+      ) {
+        ensurePageSpace(75);
+        const prodY = doc.y;
+        const numItems = Math.min(3, reportData.recommendedProducts.length);
+        const gap = 10;
+        const itemWidth = (contentWidth - gap * (numItems - 1)) / numItems;
+        const itemHeight = 56;
+
+        reportData.recommendedProducts.slice(0, 3).forEach((item: any, idx: number) => {
+          const itemX = leftMargin + idx * (itemWidth + gap);
+
+          // Card Container
+          doc
+            .roundedRect(itemX, prodY, itemWidth, itemHeight, 7)
+            .fillAndStroke('#ffffff', borderLight);
+
+          // Thumbnail placeholder / box with clean vector toolbox icon
+          doc
+            .roundedRect(itemX + 8, prodY + 9, 38, 38, 5)
+            .fill('#f1f5f9');
+
+          doc
+            .roundedRect(itemX + 17, prodY + 20, 20, 16, 2)
+            .strokeColor('#94a3b8')
+            .lineWidth(0.8)
+            .stroke();
+          doc
+            .moveTo(itemX + 22, prodY + 20)
+            .lineTo(itemX + 22, prodY + 24)
+            .stroke();
+          doc
+            .moveTo(itemX + 32, prodY + 20)
+            .lineTo(itemX + 32, prodY + 24)
+            .stroke();
+
+          // Product Details
+          const textX = itemX + 52;
+          const textW = itemWidth - 96;
+
+          doc
+            .font('Helvetica-Bold')
+            .fontSize(7.5)
+            .fillColor(textPrimary)
+            .text(item.name || 'Product', textX, prodY + 10, {
+              width: textW,
+              height: 20,
+              ellipsis: true,
+            });
+
+          const priceStr = item.price ? (item.price.startsWith('€') || item.price.startsWith('$') ? item.price : `€${item.price}`) : '€0.00';
+          doc
+            .font('Helvetica-Bold')
+            .fontSize(8)
+            .fillColor(blueAccent)
+            .text(priceStr, textX, prodY + 34);
+
+          // Buy Button
+          const buyBtnX = itemX + itemWidth - 42;
+          const buyBtnY = prodY + 28;
+          doc
+            .roundedRect(buyBtnX, buyBtnY, 34, 16, 4)
+            .fillAndStroke('#f8fafc', borderLight);
+
+          doc
+            .font('Helvetica-Bold')
+            .fontSize(6.5)
+            .fillColor(textDark)
+            .text('Buy ->', buyBtnX, buyBtnY + 4, {
+              align: 'center',
+              width: 34,
+              link: item.buyLink || undefined,
+            });
+        });
+
+        doc.y = prodY + itemHeight + 14;
+      } else {
+        drawEmptyStateCard('No recommended products or tools were added for this consultation.');
+      }
+
+      // ─── 6. Helpful Links Section ───
+      drawSectionHeader('Helpful Links', blueAccent);
+
+      if (reportData.links && reportData.links.length > 0) {
+        ensurePageSpace(45);
+        reportData.links.forEach((link: string) => {
+          ensurePageSpace(32);
+          const linkCardY = doc.y;
+          doc
+            .roundedRect(leftMargin, linkCardY, contentWidth, 26, 6)
+            .fillAndStroke(cardBgLight, borderLight);
+
+          // Vector Link chain graphic
+          doc
+            .circle(leftMargin + 13, linkCardY + 13, 2.5)
+            .strokeColor(blueAccent)
+            .lineWidth(0.8)
+            .stroke();
+          doc
+            .circle(leftMargin + 18, linkCardY + 13, 2.5)
+            .strokeColor(blueAccent)
+            .lineWidth(0.8)
+            .stroke();
+          doc
+            .moveTo(leftMargin + 13, linkCardY + 13)
+            .lineTo(leftMargin + 18, linkCardY + 13)
+            .stroke();
+
+          doc
+            .font('Helvetica')
+            .fontSize(8)
+            .fillColor(blueAccent)
+            .text(link, leftMargin + 26, linkCardY + 8, {
+              width: contentWidth - 55,
+              ellipsis: true,
+              link: link,
+              underline: true,
+            });
+
+          // Clean Arrow indicator
+          doc
+            .font('Helvetica-Bold')
+            .fontSize(7.5)
+            .fillColor(textSecondary)
+            .text('->', leftMargin + contentWidth - 18, linkCardY + 8);
+
+          doc.y = linkCardY + 32;
+        });
+        doc.y += 2;
+      } else {
+        drawEmptyStateCard('No external links were attached for this consultation.');
+      }
+
+      // ─── 7. Attached Photos Section ───
+      drawSectionHeader('Attached Photos', orangeAccent);
+
+      if (reportData.images && reportData.images.length > 0) {
+        ensurePageSpace(115);
+        const imgStartY = doc.y;
+        const imgSize = 95;
+        const imgGap = 12;
+
+        reportData.images.slice(0, 4).forEach((imgUrl: string, idx: number) => {
+          const imgX = leftMargin + idx * (imgSize + imgGap);
           const fileName = path.basename(imgUrl);
-          const localPath = path.join(
-            process.cwd(),
-            'uploads',
-            'image',
-            fileName,
-          );
+          const localPath = path.join(process.cwd(), 'uploads', 'image', fileName);
+
+          // Card frame for image
+          doc
+            .roundedRect(imgX, imgStartY, imgSize, imgSize, 8)
+            .fillAndStroke('#ffffff', borderLight);
 
           if (fs.existsSync(localPath)) {
             try {
-              // Check if we need a new page for the image (approximate image height 300)
-              if (doc.y + 300 > 700) {
-                doc.addPage();
-              }
-
-              // Add image with a maximum width to fit the page
-              doc.image(localPath, {
-                fit: [512, 300],
+              doc.image(localPath, imgX + 4, imgStartY + 4, {
+                fit: [imgSize - 8, imgSize - 8],
                 align: 'center',
+                valign: 'center',
               });
-              doc.moveDown(1);
             } catch (err) {
-              console.error(`Failed to add image to PDF: ${localPath}`, err);
+              console.error(`Failed to add image thumbnail: ${localPath}`, err);
             }
+          } else {
+            doc
+              .font('Helvetica')
+              .fontSize(7.5)
+              .fillColor(textSecondary)
+              .text('Image Attached', imgX, imgStartY + 42, { align: 'center', width: imgSize });
           }
         });
+
+        doc.y = imgStartY + imgSize + 14;
+      } else {
+        drawEmptyStateCard('No photos or attachments were uploaded for this consultation.');
       }
 
-      // Footer
-      const pageCount = doc.bufferedPageRange().count;
-      doc
-        .fontSize(8)
-        .fillColor('#adb5bd')
-        .text(
-          `Generated by Fixpair Live Consultancy - Page ${pageCount}`,
-          50,
-          750,
-          { align: 'center' },
-        );
+      // ─── 8. Consultant Notes (if provided) ───
+      if (reportData.notes && reportData.notes !== summaryText) {
+        drawSectionHeader('Consultant Notes & Observations', blueAccent);
+        ensurePageSpace(45);
+        const notesY = doc.y;
+        doc.font('Helvetica').fontSize(8.5);
+        const notesH = doc.heightOfString(reportData.notes, { width: contentWidth - 24 }) + 16;
+
+        doc
+          .roundedRect(leftMargin, notesY, contentWidth, Math.max(34, notesH), 6)
+          .fillAndStroke('#ffffff', borderLight);
+
+        doc
+          .font('Helvetica')
+          .fontSize(8.5)
+          .fillColor(textDark)
+          .text(reportData.notes, leftMargin + 12, notesY + 8, {
+            width: contentWidth - 24,
+            lineGap: 2.5,
+          });
+
+        doc.y = notesY + Math.max(34, notesH) + 14;
+      }
+
+      // ─── 9. Page Numbering & Footer ───
+      const range = doc.bufferedPageRange();
+      for (let i = range.start; i < range.start + range.count; i++) {
+        doc.switchToPage(i);
+        doc
+          .font('Helvetica')
+          .fontSize(7.5)
+          .fillColor('#94a3b8')
+          .text(
+            `Generated by Fixpair Live Consultancy  ·  Confidential  ·  Page ${i + 1} of ${range.count}`,
+            leftMargin,
+            810,
+            { align: 'center', width: contentWidth },
+          );
+      }
 
       doc.end();
 
@@ -229,7 +649,16 @@ const generateConsultationPDF = async (reportData: any): Promise<string> => {
 };
 
 const createReport = async (user: JwtPayload, payload: any, files: any) => {
-  const { consultationId, notes, links, conversation } = payload;
+  const {
+    consultationId,
+    summary,
+    keyPoints,
+    stepsTaken,
+    recommendedProducts,
+    notes,
+    links,
+    conversation,
+  } = payload;
 
   const consultation =
     await Consultation.findById(consultationId).populate('user consultant');
@@ -311,21 +740,105 @@ const createReport = async (user: JwtPayload, payload: any, files: any) => {
   });
   const duration = videoSession?.duration || 0;
 
+  // Process links
+  let parsedLinks = links;
+  if (typeof links === 'string') {
+    try {
+      parsedLinks = JSON.parse(links);
+    } catch {
+      parsedLinks = [links];
+    }
+  }
+  if (!Array.isArray(parsedLinks)) parsedLinks = parsedLinks ? [parsedLinks] : [];
+
+  // Process keyPoints
+  let parsedKeyPoints = keyPoints;
+  if (typeof keyPoints === 'string') {
+    try {
+      parsedKeyPoints = JSON.parse(keyPoints);
+    } catch {
+      parsedKeyPoints = [keyPoints];
+    }
+  }
+
+  // Process stepsTaken
+  let parsedStepsTaken = stepsTaken;
+  if (typeof stepsTaken === 'string') {
+    try {
+      parsedStepsTaken = JSON.parse(stepsTaken);
+    } catch {
+      parsedStepsTaken = [stepsTaken];
+    }
+  }
+
+  // Process recommendedProducts
+  let parsedRecommendedProducts = recommendedProducts;
+  if (typeof recommendedProducts === 'string') {
+    try {
+      parsedRecommendedProducts = JSON.parse(recommendedProducts);
+    } catch {
+      parsedRecommendedProducts = [];
+    }
+  }
+  if (!Array.isArray(parsedRecommendedProducts)) parsedRecommendedProducts = [];
+
+  // Process images
+  let payloadImages = payload.images || [];
+  if (typeof payloadImages === 'string') {
+    try {
+      payloadImages = JSON.parse(payloadImages);
+    } catch {
+      payloadImages = [payloadImages];
+    }
+  }
+  if (!Array.isArray(payloadImages)) payloadImages = payloadImages ? [payloadImages] : [];
+
   const imageFiles = [...(files?.image || []), ...(files?.images || [])];
-  const images = imageFiles.map((file: any) => `/image/${file.filename}`);
+  const uploadedImages = imageFiles.map((file: any) => `/image/${file.filename}`);
+  const images = [...uploadedImages, ...payloadImages];
+
+  // Fetch or generate AI Summary
+  let aiSummary = (consultation as any).aiSummary;
+  if (!aiSummary || !aiSummary.overview) {
+    try {
+      aiSummary = await generateOrGetAiSummary(consultationId);
+    } catch (err) {
+      console.error('Failed to generate AI summary for report:', err);
+    }
+  }
+
+  const finalSummary = summary || aiSummary?.overview || '';
+  const finalKeyPoints =
+    Array.isArray(parsedKeyPoints) && parsedKeyPoints.length > 0
+      ? parsedKeyPoints
+      : aiSummary?.keyPoints || [];
+  const finalStepsTaken =
+    Array.isArray(parsedStepsTaken) && parsedStepsTaken.length > 0
+      ? parsedStepsTaken
+      : aiSummary?.actionItems || [];
+  const finalRecommendedProducts = Array.isArray(parsedRecommendedProducts)
+    ? parsedRecommendedProducts
+    : [];
 
   const reportData = {
     consultationId: consultation._id,
-    date: consultation.date,
+    date: consultation.date || (consultation as any).createdAt,
+    bookingType: (consultation as any).bookingType || 'instant',
+    status: consultation.status || 'completed',
     userName: (consultation.user as any).name,
     userEmail: (consultation.user as any).email,
     consultantName: (consultation.consultant as any).name,
     consultantEmail: (consultation.consultant as any).email,
     conversation: finalConversation,
     duration,
+    summary: finalSummary,
+    keyPoints: finalKeyPoints,
+    stepsTaken: finalStepsTaken,
+    recommendedProducts: finalRecommendedProducts,
     notes,
-    links: links ? (typeof links === 'string' ? [links] : links) : [],
+    links: parsedLinks,
     images,
+    aiSummary,
   };
 
   const pdfUrl = await generateConsultationPDF(reportData);
@@ -334,15 +847,90 @@ const createReport = async (user: JwtPayload, payload: any, files: any) => {
     consultation: consultationId,
     user: consultation.user._id,
     consultant: consultation.consultant._id,
+    summary: finalSummary,
+    keyPoints: finalKeyPoints,
+    stepsTaken: finalStepsTaken,
+    recommendedProducts: finalRecommendedProducts,
     conversation: finalConversation,
     duration,
     notes,
-    links: reportData.links,
+    links: parsedLinks,
     images,
     pdfUrl,
+    aiSummary,
   });
 
   return report;
+};
+
+const generateOrGetAiSummary = async (consultationId: string) => {
+  const consultation = await Consultation.findById(consultationId).populate(
+    'user consultant',
+  );
+  if (!consultation) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Consultation not found');
+  }
+
+  // 1. If already generated on the consultation, return it
+  if (consultation.aiSummary && consultation.aiSummary.overview) {
+    return consultation.aiSummary;
+  }
+
+  // 2. Fetch all transcripts
+  const transcripts = await Transcript.find({ consultation: consultationId })
+    .sort({ timestamp: 1 })
+    .lean();
+
+  const videoSession = await VideoSession.findOne({
+    consultation: consultationId,
+  });
+  const duration = videoSession?.duration || 0;
+
+  const clientName = (consultation.user as any)?.name || 'Client';
+  const consultantName = (consultation.consultant as any)?.name || 'Consultant';
+
+  const summary = await GeminiHelper.generateConsultationSummary(
+    transcripts.map((t) => ({ speakerRole: t.speakerRole, text: t.text })),
+    {
+      clientName,
+      consultantName,
+      durationSeconds: duration,
+    },
+  );
+
+  // 3. Save to Consultation document
+  await Consultation.findByIdAndUpdate(consultationId, {
+    $set: { aiSummary: summary },
+  });
+
+  // 4. Also update Report if it already exists
+  await Report.findOneAndUpdate(
+    { consultation: consultationId },
+    { $set: { aiSummary: summary } },
+  );
+
+  // 5. Emit real-time socket events
+  const payload = {
+    consultationId,
+    aiSummary: summary,
+  };
+  socketHelper.emitToUser(
+    consultation.user._id.toString(),
+    'ai-summary-ready',
+    payload,
+  );
+  socketHelper.emitToUser(
+    consultation.consultant._id.toString(),
+    'ai-summary-ready',
+    payload,
+  );
+  socketHelper.emitToRoom(
+    `consultation:${consultationId}`,
+    'ai-summary-ready',
+    payload,
+  );
+
+  return summary;
 };
 
 const getTotalConsultations = async (user: JwtPayload): Promise<number> => {
@@ -386,14 +974,30 @@ const getReports = async (user: JwtPayload, query: Record<string, unknown>) => {
 };
 
 const getSingleReport = async (user: JwtPayload, id: string) => {
-  const report = await Report.findById(id).populate([
-    { path: 'user', select: 'name image avatar' },
-    { path: 'consultant', select: 'name image avatar' },
-    {
-      path: 'consultation',
-      select: 'status date bookingType perMinuteRate totalAmount',
-    },
-  ]);
+  let report = null;
+
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    report = await Report.findById(id).populate([
+      { path: 'user', select: 'name image avatar' },
+      { path: 'consultant', select: 'name image avatar' },
+      {
+        path: 'consultation',
+        select: 'status date bookingType perMinuteRate totalAmount',
+      },
+    ]);
+
+    // Fallback: If not found by Report ID, check if it's a Consultation ID
+    if (!report) {
+      report = await Report.findOne({ consultation: id }).populate([
+        { path: 'user', select: 'name image avatar' },
+        { path: 'consultant', select: 'name image avatar' },
+        {
+          path: 'consultation',
+          select: 'status date bookingType perMinuteRate totalAmount',
+        },
+      ]);
+    }
+  }
 
   if (!report) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Report not found');
@@ -413,9 +1017,192 @@ const getSingleReport = async (user: JwtPayload, id: string) => {
   return report;
 };
 
+const updateReport = async (
+  user: JwtPayload,
+  id: string,
+  payload: any,
+  files: any,
+) => {
+  let report = null;
+
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    report = await Report.findById(id);
+    if (!report) {
+      report = await Report.findOne({ consultation: id });
+    }
+  }
+
+  if (!report) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Report not found');
+  }
+
+  // Access control: only assigned consultant or admin can edit
+  const isConsultant =
+    user.role === 'CONSULTANT' &&
+    report.consultant.toString() === user.id;
+  const isAdmin = user.role === 'ADMIN' || user.role === 'SUPER_ADMIN';
+
+  if (!isConsultant && !isAdmin) {
+    throw new ApiError(
+      StatusCodes.FORBIDDEN,
+      'Only the assigned consultant can edit this report',
+    );
+  }
+
+  const consultation = await Consultation.findById(report.consultation).populate(
+    'user consultant',
+  );
+  if (!consultation) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Consultation not found');
+  }
+
+  const {
+    summary,
+    keyPoints,
+    stepsTaken,
+    recommendedProducts,
+    notes,
+    links,
+    conversation,
+  } = payload;
+
+  if (summary !== undefined) {
+    report.summary = summary;
+  }
+
+  if (notes !== undefined) {
+    report.notes = notes;
+  }
+
+  if (conversation !== undefined) {
+    report.conversation = conversation;
+  }
+
+  if (links !== undefined) {
+    let parsedLinks = links;
+    if (typeof links === 'string') {
+      try {
+        parsedLinks = JSON.parse(links);
+      } catch {
+        parsedLinks = [links];
+      }
+    }
+    if (!Array.isArray(parsedLinks)) {
+      parsedLinks = parsedLinks ? [parsedLinks] : [];
+    }
+    report.links = parsedLinks;
+  }
+
+  if (keyPoints !== undefined) {
+    let parsedKeyPoints = keyPoints;
+    if (typeof keyPoints === 'string') {
+      try {
+        parsedKeyPoints = JSON.parse(keyPoints);
+      } catch {
+        parsedKeyPoints = [keyPoints];
+      }
+    }
+    if (Array.isArray(parsedKeyPoints)) {
+      report.keyPoints = parsedKeyPoints;
+    }
+  }
+
+  if (stepsTaken !== undefined) {
+    let parsedStepsTaken = stepsTaken;
+    if (typeof stepsTaken === 'string') {
+      try {
+        parsedStepsTaken = JSON.parse(stepsTaken);
+      } catch {
+        parsedStepsTaken = [stepsTaken];
+      }
+    }
+    if (Array.isArray(parsedStepsTaken)) {
+      report.stepsTaken = parsedStepsTaken;
+    }
+  }
+
+  if (recommendedProducts !== undefined) {
+    let parsedRecommendedProducts = recommendedProducts;
+    if (typeof recommendedProducts === 'string') {
+      try {
+        parsedRecommendedProducts = JSON.parse(recommendedProducts);
+      } catch {
+        parsedRecommendedProducts = [];
+      }
+    }
+    if (Array.isArray(parsedRecommendedProducts)) {
+      report.recommendedProducts = parsedRecommendedProducts;
+    }
+  }
+
+  const imageFiles = [...(files?.image || []), ...(files?.images || [])];
+  const uploadedImages = imageFiles.map((file: any) => `/image/${file.filename}`);
+
+  let currentImages = report.images || [];
+  if (payload.images !== undefined) {
+    let payloadImages = payload.images;
+    if (typeof payloadImages === 'string') {
+      try {
+        payloadImages = JSON.parse(payloadImages);
+      } catch {
+        payloadImages = [payloadImages];
+      }
+    }
+    if (!Array.isArray(payloadImages)) {
+      payloadImages = payloadImages ? [payloadImages] : [];
+    }
+    currentImages = payloadImages;
+  }
+
+  if (uploadedImages.length > 0) {
+    currentImages = [...currentImages, ...uploadedImages];
+  }
+  report.images = currentImages;
+
+  // Prepare updated report data for regenerating PDF
+  const reportData = {
+    consultationId: consultation._id,
+    date: consultation.date || (consultation as any).createdAt,
+    bookingType: (consultation as any).bookingType || 'instant',
+    status: consultation.status || 'completed',
+    userName: (consultation.user as any).name,
+    userEmail: (consultation.user as any).email,
+    consultantName: (consultation.consultant as any).name,
+    consultantEmail: (consultation.consultant as any).email,
+    conversation: report.conversation,
+    duration: report.duration || 0,
+    summary: report.summary || '',
+    keyPoints: report.keyPoints || [],
+    stepsTaken: report.stepsTaken || [],
+    recommendedProducts: report.recommendedProducts || [],
+    notes: report.notes,
+    links: report.links,
+    images: report.images,
+    aiSummary: report.aiSummary,
+  };
+
+  const pdfUrl = await generateConsultationPDF(reportData);
+  report.pdfUrl = pdfUrl;
+
+  await report.save();
+
+  const updatedReport = await Report.findById(report._id).populate([
+    { path: 'user', select: 'name image avatar' },
+    { path: 'consultant', select: 'name image avatar' },
+    {
+      path: 'consultation',
+      select: 'status date bookingType perMinuteRate totalAmount',
+    },
+  ]);
+
+  return updatedReport;
+};
+
 export const ReportService = {
   createReport,
+  updateReport,
   getReports,
   getSingleReport,
   getTotalConsultations,
+  generateOrGetAiSummary,
 };

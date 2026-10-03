@@ -35,6 +35,23 @@ const getMyUnavailability = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const removeUnavailability = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as any;
+  const { slotId } = req.params;
+  const result = await ConsultationService.removeUnavailability(
+    user,
+    slotId,
+    req.body,
+  );
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'Unavailable slot removed successfully',
+    data: result,
+  });
+});
+
 const getAvailableSlots = catchAsync(async (req: Request, res: Response) => {
   const { consultantId } = req.params;
   const { date } = req.query;
@@ -71,6 +88,19 @@ const getMyBookings = catchAsync(async (req: Request, res: Response) => {
     success: true,
     statusCode: StatusCodes.OK,
     message: 'Bookings retrieved successfully',
+    pagination: result.meta,
+    data: result.result,
+  });
+});
+
+const getMyAppointments = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as any;
+  const result = await ConsultationService.getMyAppointments(user, req.query);
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'Appointments retrieved successfully',
     pagination: result.meta,
     data: result.result,
   });
@@ -155,9 +185,11 @@ const initiateCallback = catchAsync(async (req: Request, res: Response) => {
 export const ConsultationController = {
   setUnavailability,
   getMyUnavailability,
+  removeUnavailability,
   getAvailableSlots,
   createBooking,
   getMyBookings,
+  getMyAppointments,
   updateBookingStatus,
   rescheduleBooking,
   cancelBooking,

@@ -64,6 +64,49 @@ Then I should receive an access token and a success response
       expect(res.body.success).toBe(true);
       expect(res.body.data.accessToken).toBeDefined();
     });
+
+    it('should support rememberMe: true on login with extended session cookie', async () => {
+      const payload = {
+        email: testUsers.superAdminEmail,
+        password: 'AdminPassword123!',
+        rememberMe: true,
+      };
+
+      const res = await request(app).post('/api/v1/auth/login').send(payload);
+
+      expect(res.status).toBe(StatusCodes.OK);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.rememberMe).toBe(true);
+      expect(res.body.data.refreshToken).toBeDefined();
+
+      const setCookie = res.headers['set-cookie'];
+      expect(setCookie).toBeDefined();
+      const cookieHeader = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie;
+      expect(cookieHeader).toContain('refreshToken=');
+      // Max-Age for 90 days = 7776000 seconds
+      expect(cookieHeader).toMatch(/Max-Age=7776000/i);
+    });
+
+    it('should default to short session when rememberMe: false or omitted', async () => {
+      const payload = {
+        email: testUsers.superAdminEmail,
+        password: 'AdminPassword123!',
+        rememberMe: false,
+      };
+
+      const res = await request(app).post('/api/v1/auth/login').send(payload);
+
+      expect(res.status).toBe(StatusCodes.OK);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.rememberMe).toBe(false);
+
+      const setCookie = res.headers['set-cookie'];
+      expect(setCookie).toBeDefined();
+      const cookieHeader = Array.isArray(setCookie) ? setCookie.join('; ') : setCookie;
+      expect(cookieHeader).toContain('refreshToken=');
+      // Max-Age for 1 day = 86400 seconds
+      expect(cookieHeader).toMatch(/Max-Age=86400/i);
+    });
   });
 
   describe('Admin User Management (Consultant Creation)', () => {

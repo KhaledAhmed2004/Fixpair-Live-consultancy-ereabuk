@@ -79,22 +79,33 @@ const cronJobs = () => {
     }
   });
 
-  // Run every minute to check for expired instant consultations
+  // Run every minute to check for expired instant consultations (older than 1 minute)
   cron.schedule('* * * * *', async () => {
     try {
-      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-      
-      const result = await Consultation.updateMany(
-        { 
-          bookingType: 'instant', 
-          status: 'pending', 
-          createdAt: { $lt: fiveMinutesAgo } 
-        },
-        { $set: { status: 'expired' } }
-      );
-      
-      if (result.modifiedCount > 0) {
-        logger.info(`Expired ${result.modifiedCount} pending instant consultations.`);
+      const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+
+      const staleConsultations = await Consultation.find({
+        bookingType: 'instant',
+        status: 'pending',
+        createdAt: { $lt: oneMinuteAgo },
+      });
+
+      if (staleConsultations.length > 0) {
+        const staleIds = staleConsultations.map((c) => c._id);
+        const result = await Consultation.updateMany(
+          { _id: { $in: staleIds } },
+          { $set: { status: 'expired' } },
+        );
+        await VideoSession.updateMany(
+          { consultation: { $in: staleIds }, status: 'pending' },
+          { $set: { status: 'cancelled' } },
+        );
+
+        if (result.modifiedCount > 0) {
+          logger.info(
+            `Expired ${result.modifiedCount} pending instant consultations.`,
+          );
+        }
       }
     } catch (error) {
       logger.error('Cron job failed: expireInstantConsultations', error);

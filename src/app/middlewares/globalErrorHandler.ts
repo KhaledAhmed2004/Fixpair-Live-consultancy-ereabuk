@@ -40,6 +40,28 @@ const globalErrorHandler: ErrorRequestHandler = (error, req, res, next) => {
           },
         ]
       : [];
+  } else if (error.name === 'JsonWebTokenError') {
+    statusCode = StatusCodes.UNAUTHORIZED;
+    message = 'Invalid Token';
+    errorMessages = error?.message
+      ? [
+          {
+            path: '',
+            message: 'Invalid or malformed token. Please log in again.',
+          },
+        ]
+      : [];
+  } else if (error.name === 'CastError') {
+    statusCode = StatusCodes.BAD_REQUEST;
+    message = 'Invalid ID format';
+    errorMessages = error?.message
+      ? [
+          {
+            path: '',
+            message: 'The requested resource ID is invalid.',
+          },
+        ]
+      : [];
   } else if (error instanceof ApiError) {
     statusCode = error.statusCode;
     message = error.message;

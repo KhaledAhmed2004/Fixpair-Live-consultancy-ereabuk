@@ -15,6 +15,8 @@ import config from '../../../config';
 import { NotificationService } from '../notification/notification.service';
 import { cacheHelper } from '../../utils/cache';
 import { VideoSessionService } from '../videoSession/videoSession.service';
+import { VideoSession } from '../videoSession/videoSession.model';
+import { socketHelper } from '../../../helpers/socketHelper';
 import { Review } from '../review/review.model';
 
 const startOfDay = (date: Date): Date => {
@@ -74,6 +76,55 @@ const getMyUnavailability = async (user: JwtPayload) => {
   return availability;
 };
 
+const removeUnavailability = async (
+  user: JwtPayload,
+  slotId?: string,
+  payload?: { date?: string; startTime?: string; endTime?: string; slotId?: string },
+) => {
+  const consultantId = user.id;
+  const targetSlotId = slotId || payload?.slotId;
+
+  if (targetSlotId) {
+    const result = await Availability.findOneAndUpdate(
+      { consultant: consultantId },
+      {
+        $pull: {
+          slots: { _id: targetSlotId },
+        },
+      },
+      { new: true },
+    );
+    return result || { slots: [] };
+  }
+
+  if (payload?.date && payload?.startTime && payload?.endTime) {
+    const slotDate = startOfDay(new Date(payload.date));
+    const result = await Availability.findOneAndUpdate(
+      { consultant: consultantId },
+      {
+        $pull: {
+          slots: {
+            date: slotDate,
+            startTime: payload.startTime,
+            endTime: payload.endTime,
+          },
+        },
+      },
+      { new: true },
+    );
+    return result || { slots: [] };
+  }
+
+  // If no specific slot passed, clear all unavailable slots
+  const result = await Availability.findOneAndUpdate(
+    { consultant: consultantId },
+    { $set: { slots: [] } },
+    { new: true },
+  );
+
+  return result || { slots: [] };
+};
+
 const getAvailableSlots = async (consultantId: string, date?: string) => {
   // 1. Find the unavailable slots for the consultant
   const availability = await Availability.findOne({ consultant: consultantId });
@@ -113,11 +164,13 @@ const getAvailableSlots = async (consultantId: string, date?: string) => {
 
   return {
     unavailableSlots: unavailableSlots.map(s => ({
+      _id: (s as any)._id || undefined,
       date: s.date,
       startTime: s.startTime,
       endTime: s.endTime,
     })),
     bookedSlots: bookedConsultations.map(c => ({
+      _id: c._id,
       date: c.date,
       startTime: c.startTime,
       endTime: c.endTime,
@@ -265,7 +318,28 @@ const createBooking = async (
       );
     }
 
-    // Check if the current user already has an ongoing request
+    // Clean up any stale pending instant consultations for this consultant (> 60s old)
+    const staleThreshold = new Date(Date.now() - 60 * 1000);
+    const staleConsultations = await Consultation.find({
+      consultant: new mongoose.Types.ObjectId(consultantId),
+      bookingType: 'instant',
+      status: 'pending',
+      createdAt: { $lt: staleThreshold },
+    });
+
+    if (staleConsultations.length > 0) {
+      const staleIds = staleConsultations.map((c) => c._id);
+      await Consultation.updateMany(
+        { _id: { $in: staleIds } },
+        { $set: { status: 'expired' } },
+      );
+      await VideoSession.updateMany(
+        { consultation: { $in: staleIds }, status: 'pending' },
+        { $set: { status: 'cancelled' } },
+      );
+    }
+
+    // Check if the current user already has an active ongoing request
     const existingPending = await Consultation.findOne({
       user: new mongoose.Types.ObjectId(userId),
       consultant: new mongoose.Types.ObjectId(consultantId),
@@ -274,19 +348,54 @@ const createBooking = async (
     });
 
     if (existingPending) {
-      throw new ApiError(
-        StatusCodes.CONFLICT,
-        'You already have an ongoing call request with this consultant.',
-      );
+      // Check if there is an active ongoing video session (already connected)
+      const activeOngoingSession = await VideoSession.findOne({
+        consultation: existingPending._id,
+        status: 'ongoing',
+      });
+
+      if (activeOngoingSession) {
+        throw new ApiError(
+          StatusCodes.CONFLICT,
+          'You already have an ongoing call request with this consultant.',
+        );
+      }
+
+      // If the pending request was created more than 45 seconds ago (or disconnected/stale),
+      // auto-cancel the orphaned pending request so user isn't stuck
+      const isStale = existingPending.createdAt
+        ? Date.now() - new Date(existingPending.createdAt).getTime() > 45 * 1000
+        : false;
+      if (isStale) {
+        await Consultation.findByIdAndUpdate(existingPending._id, {
+          status: 'cancelled',
+          cancelledAt: new Date(),
+          cancelReason: 'superseded_by_new_call',
+        });
+        await VideoSession.updateMany(
+          { consultation: existingPending._id, status: 'pending' },
+          { status: 'cancelled' },
+        );
+      } else {
+        throw new ApiError(
+          StatusCodes.CONFLICT,
+          'You already have an ongoing call request with this consultant.',
+        );
+      }
     }
 
     // Check if consultant is busy with anyone else
     const busyConsultant = await Consultation.findOne({
       consultant: new mongoose.Types.ObjectId(consultantId),
+      user: { $ne: new mongoose.Types.ObjectId(userId) },
       $or: [
         { status: 'ongoing' },
-        { bookingType: 'instant', status: { $in: ['pending', 'accepted', 'confirmed'] } }
-      ]
+        {
+          bookingType: 'instant',
+          status: { $in: ['pending', 'accepted', 'confirmed'] },
+          createdAt: { $gte: staleThreshold },
+        },
+      ],
     });
 
     if (busyConsultant) {
@@ -419,6 +528,123 @@ const getMyBookings = async (
   return { result, meta };
 };
 
+const getMyAppointments = async (
+  user: JwtPayload,
+  query: Record<string, unknown>,
+) => {
+  const filter: Record<string, any> = {};
+
+  // 1. Role-aware filtering
+  if (user.role === 'USER') {
+    filter.user = new mongoose.Types.ObjectId(user.id);
+  } else if (user.role === 'CONSULTANT') {
+    filter.consultant = new mongoose.Types.ObjectId(user.id);
+  }
+
+  // Clone query to avoid mutating original and prevent QueryBuilder from querying unmapped keys
+  const queryObj = { ...query };
+
+  // 2. Status & Tab handling (Defaults to upcoming/active, excludes completed/done sessions)
+  const tab = queryObj.tab as string;
+  delete queryObj.tab;
+
+  if (queryObj.status) {
+    const statuses = (queryObj.status as string)
+      .split(',')
+      .map(s => s.trim());
+    if (statuses.length === 1) {
+      filter.status = statuses[0];
+    } else {
+      filter.status = { $in: statuses };
+    }
+    delete queryObj.status;
+  } else if (tab === 'history') {
+    filter.status = { $in: ['completed', 'cancelled', 'rejected', 'expired'] };
+  } else if (tab === 'requests') {
+    filter.status = 'pending';
+  } else if (tab === 'all') {
+    // No status constraint
+  } else {
+    // Default (e.g. upcoming bookings): ONLY active/upcoming bookings
+    filter.status = { $in: ['pending', 'accepted', 'confirmed'] };
+  }
+
+  // 3. Booking Type handling
+  if (queryObj.bookingType) {
+    const types = (queryObj.bookingType as string)
+      .split(',')
+      .map(t => t.trim());
+    if (types.length === 1) {
+      filter.bookingType = types[0];
+    } else {
+      filter.bookingType = { $in: types };
+    }
+    delete queryObj.bookingType;
+  } else if (tab === 'history') {
+    // In History view: include all past consultation types (instant, scheduled, callback)
+    filter.bookingType = { $in: ['scheduled', 'callback', 'instant'] };
+  } else {
+    // In Upcoming/Appointments view: only scheduled and callback are upcoming appointments
+    filter.bookingType = { $in: ['scheduled', 'callback'] };
+  }
+
+  const bookingQuery = new QueryBuilder(Consultation.find(filter), queryObj)
+    .filter()
+    .sort()
+    .paginate()
+    .fields();
+
+  // Ensure user and consultant fields are always selected for population
+  bookingQuery.modelQuery.select('user consultant');
+
+  const resultList = await bookingQuery.modelQuery.populate([
+    { path: 'user', select: 'name image avatar email' },
+    {
+      path: 'consultant',
+      select: 'name image avatar email tags consultancyType perMinuteRate rating',
+      populate: { path: 'consultancyType' },
+    },
+    { path: 'report', select: '_id pdfUrl createdAt' },
+  ]);
+  const meta = await bookingQuery.getPaginationInfo();
+
+  // Fetch reviews for these bookings to add isReviewed flag
+  const bookingIds = resultList.map(b => b._id);
+  const reviews = await Review.find({
+    consultation: { $in: bookingIds },
+  }).select('consultation');
+  const reviewedBookingIds = new Set(
+    reviews.map(r => r.consultation.toString()),
+  );
+
+  const result = resultList.map(b => {
+    const obj = b.toObject() as any;
+    obj.isReviewed = reviewedBookingIds.has(b._id.toString());
+
+    // Helper UI action flags
+    const isPending = obj.status === 'pending';
+    const isActiveOrPending = ['pending', 'accepted', 'confirmed'].includes(
+      obj.status,
+    );
+
+    obj.canAccept = user.role === 'CONSULTANT' && isPending;
+    obj.canReject = user.role === 'CONSULTANT' && isPending;
+    obj.canReschedule =
+      obj.bookingType === 'scheduled' &&
+      isActiveOrPending &&
+      user.role === 'USER';
+    obj.canCancel = isActiveOrPending;
+    obj.canInitiateCallback =
+      user.role === 'CONSULTANT' &&
+      obj.bookingType === 'callback' &&
+      ['pending', 'accepted'].includes(obj.status);
+
+    return obj;
+  });
+
+  return { result, meta };
+};
+
 const updateBookingStatus = async (
   user: JwtPayload,
   bookingId: string,
@@ -437,112 +663,159 @@ const updateBookingStatus = async (
   },
 ) => {
   const { status, date, startTime, endTime } = payload;
-  const session = await mongoose.startSession();
-  session.startTransaction();
 
-  try {
-    const booking = await Consultation.findById(bookingId).session(session);
-    if (!booking) {
-      throw new ApiError(StatusCodes.NOT_FOUND, 'Booking not found');
+  let resolvedBookingId = bookingId;
+  let booking = await Consultation.findById(bookingId);
+  if (!booking) {
+    // Check if the provided ID is actually a VideoSession ID
+    const sessionDoc = await VideoSession.findById(bookingId);
+    if (sessionDoc && sessionDoc.consultation) {
+      booking = await Consultation.findById(sessionDoc.consultation);
+      if (booking) {
+        resolvedBookingId = sessionDoc.consultation.toString();
+      }
     }
+  }
 
-    // Prevent updating if booking is already cancelled or completed
-    if (['cancelled', 'completed', 'expired'].includes(booking.status)) {
+  if (!booking) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Booking not found');
+  }
+
+  // Prevent updating if booking is already cancelled or completed
+  if (['cancelled', 'completed', 'expired'].includes(booking.status)) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      `Cannot update status. Booking is already ${booking.status}`,
+    );
+  }
+
+  // Authorization: Only consultant or admin can update status
+  if (
+    user.role !== 'CONSULTANT' &&
+    user.role !== 'ADMIN' &&
+    user.role !== 'SUPER_ADMIN'
+  ) {
+    throw new ApiError(
+      StatusCodes.FORBIDDEN,
+      'You do not have permission to update booking status',
+    );
+  }
+
+  // Re-verify availability if the consultant is accepting a scheduled booking
+  if (status === 'accepted' && booking.bookingType === 'scheduled') {
+    const slotDate = new Date(booking.date!);
+    slotDate.setHours(0, 0, 0, 0);
+
+    // 1. Check if slot is marked as UNAVAILABLE by consultant
+    const isUnavailable = await Availability.findOne({
+      consultant: booking.consultant,
+      slots: {
+        $elemMatch: {
+          date: slotDate,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+        },
+      },
+    });
+
+    if (isUnavailable) {
       throw new ApiError(
         StatusCodes.BAD_REQUEST,
-        `Cannot update status. Booking is already ${booking.status}`,
+        'This slot is now marked unavailable. Cannot accept booking.',
       );
     }
 
-    // Authorization: Only consultant or admin can update status
-    if (
-      user.role !== 'CONSULTANT' &&
-      user.role !== 'ADMIN' &&
-      user.role !== 'SUPER_ADMIN'
-    ) {
+    // 2. Check if slot is ALREADY BOOKED by another confirmed booking
+    const overlappingBooking = await Consultation.findOne({
+      consultant: booking.consultant,
+      date: slotDate,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      status: { $in: ['accepted', 'confirmed', 'completed'] },
+      _id: { $ne: booking._id },
+    });
+
+    if (overlappingBooking) {
       throw new ApiError(
-        StatusCodes.FORBIDDEN,
-        'You do not have permission to update booking status',
+        StatusCodes.CONFLICT,
+        'This slot is already occupied by another confirmed booking.',
       );
     }
+  }
 
-    // Re-verify availability if the consultant is accepting a scheduled booking
-    if (status === 'accepted' && booking.bookingType === 'scheduled') {
-      const slotDate = new Date(booking.date!);
-      slotDate.setHours(0, 0, 0, 0);
+  // Additional logic for callback or instant bookings
+  // Map 'accepted' to 'confirmed' as per requirement
+  const updateData: any = {
+    status: status === 'accepted' ? 'confirmed' : status,
+  };
+  if (date) updateData.date = new Date(date);
+  if (startTime) updateData.startTime = startTime;
+  if (endTime) updateData.endTime = endTime;
 
-      // 1. Check if slot is marked as UNAVAILABLE by consultant
-      const isUnavailable = await Availability.findOne({
-        consultant: booking.consultant,
-        slots: {
-          $elemMatch: {
-            date: slotDate,
-            startTime: booking.startTime,
-            endTime: booking.endTime,
-          },
-        },
-      }).session(session);
-
-      if (isUnavailable) {
-        throw new ApiError(
-          StatusCodes.BAD_REQUEST,
-          'This slot is now marked unavailable. Cannot accept booking.',
-        );
-      }
-
-      // 2. Check if slot is ALREADY BOOKED by another confirmed booking
-      const overlappingBooking = await Consultation.findOne({
-        consultant: booking.consultant,
-        date: slotDate,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        status: { $in: ['accepted', 'confirmed', 'completed'] },
-        _id: { $ne: booking._id },
-      }).session(session);
-
-      if (overlappingBooking) {
-        throw new ApiError(
-          StatusCodes.CONFLICT,
-          'This slot is already occupied by another confirmed booking.',
-        );
-      }
-    }
-
-    // Additional logic for callback or instant bookings
-    // Map 'accepted' to 'confirmed' as per requirement
-    const updateData: any = {
-      status: status === 'accepted' ? 'confirmed' : status,
-    };
-    if (date) updateData.date = new Date(date);
-    if (startTime) updateData.startTime = startTime;
-    if (endTime) updateData.endTime = endTime;
-
-    const result = await Consultation.findByIdAndUpdate(bookingId, updateData, {
+  const result = await Consultation.findByIdAndUpdate(
+    resolvedBookingId,
+    updateData,
+    {
       new: true,
-      session,
-    }).populate('consultant');
+    },
+  ).populate('consultant');
 
-    if (result && status === 'completed') {
-      await User.findByIdAndUpdate(result.consultant, {
-        $inc: { totalConsultations: 1 },
+  // If instant booking is accepted, also transition any pending video session
+  if (status === 'accepted' && booking.bookingType === 'instant') {
+    await VideoSession.findOneAndUpdate(
+      { consultation: resolvedBookingId, status: 'pending' },
+      { status: 'ongoing', startedAt: new Date() },
+    );
+  }
+
+  // If booking is rejected or cancelled, end any pending video session and notify client immediately
+  if ((status === 'rejected' || status === 'cancelled') && result && result.user) {
+    const pendingSession = await VideoSession.findOneAndUpdate(
+      { consultation: resolvedBookingId, status: 'pending' },
+      { status: 'ended', endedAt: new Date(), duration: 0 },
+      { new: true },
+    );
+
+    if (pendingSession) {
+      const eventName = status === 'rejected' ? 'call-rejected' : 'call-cancelled';
+      socketHelper.emitToUser(result.user.toString(), eventName, {
+        sessionId: pendingSession._id.toString(),
+        consultationId: result._id.toString(),
+        bookingId: result._id.toString(),
       });
-      // Invalidate related caches
-      cacheHelper.clearByPrefix('consultants:recommended');
-      cacheHelper.clearByPrefix(`consultants:list`);
+      socketHelper.emitToRoom(`consultation:${result._id}`, eventName, {
+        sessionId: pendingSession._id.toString(),
+        consultationId: result._id.toString(),
+        bookingId: result._id.toString(),
+      });
     }
+  }
 
-    if (result && (status === 'accepted' || status === 'rejected')) {
-      const consultantName = (result.consultant as any).name;
-      const date = result.date
-        ? new Date(result.date).toLocaleDateString()
-        : '';
-      const time = result.startTime || '';
+  if (result && status === 'completed' && result.consultant) {
+    const consultantId =
+      (result.consultant as any)?._id || result.consultant;
+    await User.findByIdAndUpdate(consultantId, {
+      $inc: { totalConsultations: 1 },
+    });
+    // Invalidate related caches
+    cacheHelper.clearByPrefix('consultants:recommended');
+    cacheHelper.clearByPrefix(`consultants:list`);
+  }
 
-      const message =
-        status === 'accepted'
-          ? `Your consultation request has been accepted by ${consultantName}.`
-          : `Your consultation request has been rejected by ${consultantName}.`;
+  if (result && (status === 'accepted' || status === 'rejected')) {
+    const consultantObj = result.consultant as any;
+    const consultantName = consultantObj?.name || 'Your Consultant';
+    const dateStr = result.date
+      ? new Date(result.date).toLocaleDateString()
+      : '';
+    const timeStr = result.startTime || '';
 
+    const message =
+      status === 'accepted'
+        ? `Your consultation request has been accepted by ${consultantName}.`
+        : `Your consultation request has been rejected by ${consultantName}.`;
+
+    if (result.user) {
       await NotificationService.sendNotification({
         user: result.user.toString(),
         title: `Consultation ${status === 'accepted' ? 'Accepted' : 'Rejected'}`,
@@ -553,20 +826,14 @@ const updateBookingStatus = async (
         metadata: {
           consultantName,
           status: status === 'accepted' ? 'accepted' : 'rejected',
-          date,
-          time,
+          date: dateStr,
+          time: timeStr,
         },
       });
     }
-
-    await session.commitTransaction();
-    session.endSession();
-    return result;
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    throw error;
   }
+
+  return result;
 };
 
 const rescheduleBooking = async (
@@ -577,115 +844,103 @@ const rescheduleBooking = async (
   const { date, startTime, endTime } = payload;
   const userId = user.id;
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    // 1. Find the existing booking
-    const booking = await Consultation.findById(bookingId).session(session);
-    if (!booking) {
-      throw new ApiError(StatusCodes.NOT_FOUND, 'Booking not found');
-    }
-
-    // Check if user is the owner
-    if (booking.user.toString() !== userId) {
-      throw new ApiError(StatusCodes.FORBIDDEN, 'Unauthorized access');
-    }
-
-    // 2. Validate booking type
-    if (booking.bookingType !== 'scheduled') {
-      throw new ApiError(
-        StatusCodes.BAD_REQUEST,
-        'Only scheduled bookings can be rescheduled',
-      );
-    }
-
-    // 3. Validate 6-hour rule
-    const [hours, minutes] = booking.startTime!.split(':').map(Number);
-    const bookingDateTime = new Date(booking.date!);
-    bookingDateTime.setHours(hours, minutes, 0, 0);
-
-    const now = new Date();
-    const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
-
-    if (bookingDateTime < sixHoursLater) {
-      throw new ApiError(
-        StatusCodes.BAD_REQUEST,
-        'Rescheduling is only allowed at least 6 hours before the scheduled time',
-      );
-    }
-
-    const newSlotDate = new Date(date);
-    newSlotDate.setHours(0, 0, 0, 0);
-
-    // 4. Check if new slot is UNAVAILABLE
-    const availability = await Availability.findOne({
-      consultant: booking.consultant,
-      slots: {
-        $elemMatch: {
-          date: newSlotDate,
-          startTime: startTime,
-          endTime: endTime,
-        },
-      },
-    }).session(session);
-
-    if (availability) {
-      throw new ApiError(
-        StatusCodes.BAD_REQUEST,
-        'This slot is marked unavailable by the consultant',
-      );
-    }
-
-    // 5. Check if new slot is ALREADY BOOKED
-    const existingBooking = await Consultation.findOne({
-      consultant: booking.consultant,
-      date: newSlotDate,
-      startTime: startTime,
-      endTime: endTime,
-      status: {
-        $in: ['pending', 'accepted', 'confirmed', 'completed'],
-      },
-      _id: { $ne: booking._id }, // Exclude current booking
-    }).session(session);
-
-    if (existingBooking) {
-      throw new ApiError(StatusCodes.CONFLICT, 'This slot is already booked');
-    }
-
-    // 6. Update the booking record
-    booking.date = newSlotDate;
-    booking.startTime = startTime;
-    booking.endTime = endTime;
-    booking.status = 'pending';
-
-    await booking.save({ session });
-
-    const client = await User.findById(userId).select('name');
-    const clientName = client?.name || 'A user';
-
-    await NotificationService.sendNotification({
-      user: booking.consultant.toString(),
-      title: 'Booking Rescheduled',
-      message: `${clientName} has requested to reschedule their consultation to ${newSlotDate.toLocaleDateString()} at ${startTime}.`,
-      type: 'BOOKING_RESCHEDULED',
-      relatedBooking: booking._id.toString(),
-      metadata: {
-        userName: clientName,
-        newDate: newSlotDate.toLocaleDateString(),
-        newTime: startTime,
-      },
-    });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return booking;
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    throw error;
+  // 1. Find the existing booking
+  const booking = await Consultation.findById(bookingId);
+  if (!booking) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Booking not found');
   }
+
+  // Check if user is the owner
+  if (booking.user.toString() !== userId) {
+    throw new ApiError(StatusCodes.FORBIDDEN, 'Unauthorized access');
+  }
+
+  // 2. Validate booking type
+  if (booking.bookingType !== 'scheduled') {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'Only scheduled bookings can be rescheduled',
+    );
+  }
+
+  // 3. Validate 6-hour rule
+  const [hours, minutes] = booking.startTime!.split(':').map(Number);
+  const bookingDateTime = new Date(booking.date!);
+  bookingDateTime.setHours(hours, minutes, 0, 0);
+
+  const now = new Date();
+  const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+
+  if (bookingDateTime < sixHoursLater) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'Rescheduling is only allowed at least 6 hours before the scheduled time',
+    );
+  }
+
+  const newSlotDate = new Date(date);
+  newSlotDate.setHours(0, 0, 0, 0);
+
+  // 4. Check if new slot is UNAVAILABLE
+  const availability = await Availability.findOne({
+    consultant: booking.consultant,
+    slots: {
+      $elemMatch: {
+        date: newSlotDate,
+        startTime: startTime,
+        endTime: endTime,
+      },
+    },
+  });
+
+  if (availability) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'This slot is marked unavailable by the consultant',
+    );
+  }
+
+  // 5. Check if new slot is ALREADY BOOKED
+  const existingBooking = await Consultation.findOne({
+    consultant: booking.consultant,
+    date: newSlotDate,
+    startTime: startTime,
+    endTime: endTime,
+    status: {
+      $in: ['pending', 'accepted', 'confirmed', 'completed'],
+    },
+    _id: { $ne: booking._id }, // Exclude current booking
+  });
+
+  if (existingBooking) {
+    throw new ApiError(StatusCodes.CONFLICT, 'This slot is already booked');
+  }
+
+  // 6. Update the booking record
+  booking.date = newSlotDate;
+  booking.startTime = startTime;
+  booking.endTime = endTime;
+  booking.status = 'pending';
+
+  await booking.save();
+
+  const client = await User.findById(userId).select('name');
+  const clientName = client?.name || 'A user';
+
+  await NotificationService.sendNotification({
+    user: booking.consultant.toString(),
+    title: 'Booking Rescheduled',
+    message: `${clientName} has requested to reschedule their consultation to ${newSlotDate.toLocaleDateString()} at ${startTime}.`,
+    type: 'BOOKING_RESCHEDULED',
+    relatedBooking: booking._id.toString(),
+    metadata: {
+      userName: clientName,
+      newDate: newSlotDate.toLocaleDateString(),
+      newTime: startTime,
+    },
+  });
+
+  return booking;
 };
 
 const cancelBooking = async (
@@ -696,95 +951,102 @@ const cancelBooking = async (
   const { cancelReason } = payload;
   const userId = user.id;
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  // 1. Find the booking
+  const booking = await Consultation.findById(bookingId);
+  if (!booking) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Booking not found');
+  }
 
-  try {
-    // 1. Find the booking
-    const booking = await Consultation.findById(bookingId).session(session);
-    if (!booking) {
-      throw new ApiError(StatusCodes.NOT_FOUND, 'Booking not found');
-    }
+  // 2. Ownership check
+  if (booking.user.toString() !== userId) {
+    throw new ApiError(
+      StatusCodes.FORBIDDEN,
+      'Only the booking owner can cancel the consultation',
+    );
+  }
 
-    // 2. Ownership check
-    if (booking.user.toString() !== userId) {
-      throw new ApiError(
-        StatusCodes.FORBIDDEN,
-        'Only the booking owner can cancel the consultation',
-      );
-    }
+  // 3. Status check: Prevent cancellation of already completed, rejected, or cancelled bookings
+  const nonCancellableStatuses = [
+    'completed',
+    'rejected',
+    'cancelled',
+    'expired',
+  ];
+  if (nonCancellableStatuses.includes(booking.status)) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      `Cannot cancel a booking that is already ${booking.status}`,
+    );
+  }
 
-    // 3. Status check: Prevent cancellation of already completed, rejected, or cancelled bookings
-    const nonCancellableStatuses = [
-      'completed',
-      'rejected',
-      'cancelled',
-      'expired',
-    ];
-    if (nonCancellableStatuses.includes(booking.status)) {
+  // 4. 6-hour rule check
+  // We only apply this rule to scheduled bookings with a date and time
+  if (
+    booking.bookingType === 'scheduled' &&
+    booking.date &&
+    booking.startTime
+  ) {
+    const [hours, minutes] = booking.startTime.split(':').map(Number);
+    const bookingDateTime = new Date(booking.date);
+    bookingDateTime.setHours(hours, minutes, 0, 0);
+
+    const now = new Date();
+    const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+
+    if (bookingDateTime < sixHoursLater) {
       throw new ApiError(
         StatusCodes.BAD_REQUEST,
-        `Cannot cancel a booking that is already ${booking.status}`,
+        'Cancellation is only allowed at least 6 hours before the scheduled time',
       );
     }
-
-    // 4. 6-hour rule check
-    // We only apply this rule to scheduled bookings with a date and time
-    if (
-      booking.bookingType === 'scheduled' &&
-      booking.date &&
-      booking.startTime
-    ) {
-      const [hours, minutes] = booking.startTime.split(':').map(Number);
-      const bookingDateTime = new Date(booking.date);
-      bookingDateTime.setHours(hours, minutes, 0, 0);
-
-      const now = new Date();
-      const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
-
-      if (bookingDateTime < sixHoursLater) {
-        throw new ApiError(
-          StatusCodes.BAD_REQUEST,
-          'Cancellation is only allowed at least 6 hours before the scheduled time',
-        );
-      }
-    }
-
-    // 5. Update booking status
-    booking.status = 'cancelled';
-    booking.cancelledAt = new Date();
-    booking.cancelledBy = new mongoose.Types.ObjectId(userId);
-    if (cancelReason) {
-      booking.cancelReason = cancelReason;
-    }
-
-    await booking.save({ session });
-
-    const client = await User.findById(userId).select('name');
-    const clientName = client?.name || 'A user';
-    const dateStr = booking.date ? new Date(booking.date).toLocaleDateString() : '';
-
-    await NotificationService.sendNotification({
-      user: booking.consultant.toString(),
-      title: 'Booking Cancelled',
-      message: `${clientName} has cancelled their consultation for ${dateStr}.`,
-      type: 'BOOKING_CANCELLED',
-      relatedBooking: booking._id.toString(),
-      metadata: {
-        userName: clientName,
-        bookingType: booking.bookingType,
-      },
-    });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return booking;
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    throw error;
   }
+
+  // 5. Update booking status
+  booking.status = 'cancelled';
+  booking.cancelledAt = new Date();
+  booking.cancelledBy = new mongoose.Types.ObjectId(userId);
+  if (cancelReason) {
+    booking.cancelReason = cancelReason;
+  }
+
+  await booking.save();
+
+  // If there is any associated pending video session, end it and notify consultant
+  const pendingSession = await VideoSession.findOneAndUpdate(
+    { consultation: booking._id, status: 'pending' },
+    { status: 'ended', endedAt: new Date(), duration: 0 },
+    { new: true },
+  );
+
+  if (pendingSession) {
+    socketHelper.emitToUser(
+      booking.consultant.toString(),
+      'call-cancelled',
+      {
+        sessionId: pendingSession._id.toString(),
+        consultationId: booking._id.toString(),
+        bookingId: booking._id.toString(),
+      },
+    );
+  }
+
+  const client = await User.findById(userId).select('name');
+  const clientName = client?.name || 'A user';
+  const dateStr = booking.date ? new Date(booking.date).toLocaleDateString() : '';
+
+  await NotificationService.sendNotification({
+    user: booking.consultant.toString(),
+    title: 'Booking Cancelled',
+    message: `${clientName} has cancelled their consultation for ${dateStr}.`,
+    type: 'BOOKING_CANCELLED',
+    relatedBooking: booking._id.toString(),
+    metadata: {
+      userName: clientName,
+      bookingType: booking.bookingType,
+    },
+  });
+
+  return booking;
 };
 
 const initiateCallback = async (user: JwtPayload, bookingId: string) => {
@@ -848,13 +1110,15 @@ const getConsultantTotalConsultations = async (consultantId: string) => {
 
 export const ConsultationService = {
   setUnavailability,
+  getMyUnavailability,
+  removeUnavailability,
   getAvailableSlots,
   createBooking,
   getMyBookings,
+  getMyAppointments,
   updateBookingStatus,
   getConsultantTotalConsultations,
   rescheduleBooking,
   cancelBooking,
-  getMyUnavailability,
   initiateCallback,
 };

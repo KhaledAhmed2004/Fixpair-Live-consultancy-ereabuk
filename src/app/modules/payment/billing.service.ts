@@ -259,7 +259,7 @@ const attemptMinuteCharge = async (consultationId: string, minute: number, consu
        } else {
           console.log(`[DEBUG] Calling createCharge. chargeAmount: ${chargeAmount}, stripeCustomerId: ${user?.stripeCustomerId}, methodId: ${defaultMethod?.methodId}, userId: ${user?._id}`);
           const pi = await StripeService.createCharge(
-             user!.stripeCustomerId,
+             user!.stripeCustomerId!,
              defaultMethod!.methodId,
              Math.round(chargeAmount * 100),
              consultationId,

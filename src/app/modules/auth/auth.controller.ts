@@ -23,13 +23,25 @@ const loginUser = catchAsync(async (req: Request, res: Response) => {
   const { ...loginData } = req.body;
   const result = await AuthService.loginUserFromDB(loginData);
 
-  const { refreshToken, accessToken } = result;
+  const { refreshToken, accessToken, rememberMe } = result;
 
   // set refresh token into cookie
-  const cookieOptions = {
+  const cookieOptions: {
+    secure: boolean;
+    httpOnly: boolean;
+    maxAge?: number;
+  } = {
     secure: config.node_env === 'production',
     httpOnly: true,
   };
+
+  if (rememberMe) {
+    // 90 days for persistent session
+    cookieOptions.maxAge = 90 * 24 * 60 * 60 * 1000;
+  } else {
+    // 1 day for non-persistent session
+    cookieOptions.maxAge = 1 * 24 * 60 * 60 * 1000;
+  }
 
   res.cookie('refreshToken', refreshToken, cookieOptions);
 
@@ -40,19 +52,32 @@ const loginUser = catchAsync(async (req: Request, res: Response) => {
     data: {
       accessToken,
       refreshToken,
+      rememberMe,
     },
   });
 });
 
 const socialLogin = catchAsync(async (req: Request, res: Response) => {
   const result = await AuthService.socialLoginFromDB(req.body);
-  const { refreshToken, accessToken } = result;
+  const { refreshToken, accessToken, rememberMe } = result;
 
   // set refresh token into cookie
-  const cookieOptions = {
+  const cookieOptions: {
+    secure: boolean;
+    httpOnly: boolean;
+    maxAge?: number;
+  } = {
     secure: config.node_env === 'production',
     httpOnly: true,
   };
+
+  if (rememberMe) {
+    // 90 days for persistent session
+    cookieOptions.maxAge = 90 * 24 * 60 * 60 * 1000;
+  } else {
+    // 1 day for non-persistent session
+    cookieOptions.maxAge = 1 * 24 * 60 * 60 * 1000;
+  }
 
   res.cookie('refreshToken', refreshToken, cookieOptions);
 
@@ -63,6 +88,7 @@ const socialLogin = catchAsync(async (req: Request, res: Response) => {
     data: {
       accessToken,
       refreshToken,
+      rememberMe,
     },
   });
 });
@@ -147,6 +173,25 @@ const refreshToken = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const logoutUser = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as any;
+  const { deviceToken } = req.body;
+
+  const result = await AuthService.logoutUserFromDB(
+    user.id,
+    user.role,
+    deviceToken,
+  );
+
+  res.clearCookie('refreshToken');
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: result.message || 'User logged out successfully.',
+  });
+});
+
 export const AuthController = {
   verifyEmail,
   loginUser,
@@ -156,4 +201,5 @@ export const AuthController = {
   resetPassword,
   changePassword,
   refreshToken,
+  logoutUser,
 };

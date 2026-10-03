@@ -33,14 +33,16 @@ const startTranscription = async (consultationId: string) => {
     sttToken,
   );
 
+  const finalAgentId = agentId || session.sttTaskId || 'ACTIVE_AGENT';
+
   await VideoSession.findByIdAndUpdate(session._id, {
     $set: {
-      sttTaskId: agentId,
-      transcriptionStatus: 'starting',
+      sttTaskId: finalAgentId,
+      transcriptionStatus: 'active',
     },
   });
 
-  return { agentId };
+  return { agentId: finalAgentId };
 };
 
 const stopTranscription = async (consultationId: string) => {
@@ -110,8 +112,8 @@ const ingestTranscriptChunk = async (
     session.transcriptionStatus as string
   );
   
-  // If transcription is 'stopped', check 60s grace period via session.endedAt
-  const isWithinGrace = session.transcriptionStatus === 'stopped' && session.endedAt
+  // If session ended recently, check 60s grace period via session.endedAt
+  const isWithinGrace = session.endedAt
     ? Date.now() - session.endedAt.getTime() < 60_000
     : false;
 

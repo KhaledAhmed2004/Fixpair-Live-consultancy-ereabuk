@@ -41,15 +41,56 @@ router.get(
   ReportController.getTotalConsultations,
 );
 
-router.get(
-  '/:id',
-  auth(
-    USER_ROLES.USER,
-    USER_ROLES.CONSULTANT,
-    USER_ROLES.ADMIN,
-    USER_ROLES.SUPER_ADMIN,
-  ),
-  ReportController.getSingleReport,
-);
+router
+  .route('/ai-summary/:consultationId')
+  .get(
+    auth(
+      USER_ROLES.USER,
+      USER_ROLES.CONSULTANT,
+      USER_ROLES.ADMIN,
+      USER_ROLES.SUPER_ADMIN,
+    ),
+    ReportController.getAiSummary,
+  )
+  .post(
+    auth(
+      USER_ROLES.USER,
+      USER_ROLES.CONSULTANT,
+      USER_ROLES.ADMIN,
+      USER_ROLES.SUPER_ADMIN,
+    ),
+    ReportController.getAiSummary,
+  );
+
+router
+  .route('/:id')
+  .get(
+    auth(
+      USER_ROLES.USER,
+      USER_ROLES.CONSULTANT,
+      USER_ROLES.ADMIN,
+      USER_ROLES.SUPER_ADMIN,
+    ),
+    ReportController.getSingleReport,
+  )
+  .patch(
+    auth(USER_ROLES.CONSULTANT, USER_ROLES.ADMIN, USER_ROLES.SUPER_ADMIN),
+    fileUploadHandler(),
+    (req: Request, res: Response, next: NextFunction) => {
+      if (req.body.data) {
+        req.body = ReportValidation.updateReportZodSchema.parse({
+          body:
+            typeof req.body.data === 'string'
+              ? JSON.parse(req.body.data)
+              : req.body.data,
+        }).body;
+      } else if (req.body && Object.keys(req.body).length > 0) {
+        req.body = ReportValidation.updateReportZodSchema.parse({
+          body: req.body,
+        }).body;
+      }
+      return ReportController.updateReport(req, res, next);
+    },
+  );
 
 export const ReportRoutes = router;

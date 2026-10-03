@@ -83,8 +83,17 @@ const startTranscription = async (
     );
     return agentId;
   } catch (error: any) {
+    const status = error.response?.status;
     const errorMessage = error.response?.data?.message || error.message;
-    const status = error.response?.status || StatusCodes.INTERNAL_SERVER_ERROR;
+
+    // 409 Conflict means an STT agent is already active in this channel (e.g. started by joinSession)
+    if (status === 409 || status === StatusCodes.CONFLICT) {
+      logger.info(
+        `Agora STT agent already active in channel (409 Conflict) | appId=${appId} channel=${channelName}`,
+      );
+      return error.response?.data?.agent_id || 'ALREADY_ACTIVE';
+    }
+
     errorLogger.error(
       `Agora STT start failed | appId=${appId} channel=${channelName} status=${status} message=${errorMessage}`,
     );

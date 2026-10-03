@@ -30,7 +30,7 @@ const getRecommendedConsultants = async () => {
   // Group by category and slice top 5 manually (faster than aggregation for this size)
   const grouped: Record<string, any[]> = {};
   consultants.forEach(c => {
-    const type = c.consultancyType as string;
+    const type = String(c.consultancyType || 'Other');
     if (!grouped[type]) grouped[type] = [];
     if (grouped[type].length < 5) {
       grouped[type].push({

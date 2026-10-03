@@ -65,10 +65,17 @@ const handleCallAction = catchAsync(async (req: Request, res: Response) => {
     action,
   );
 
+  const actionMsg =
+    action === 'REJECT'
+      ? 'Call rejected successfully'
+      : action === 'CANCEL'
+      ? 'Call cancelled successfully'
+      : 'Video session ended successfully';
+
   sendResponse(res, {
     success: true,
     statusCode: StatusCodes.OK,
-    message: `Call ${action.toLowerCase()}ed successfully`,
+    message: actionMsg,
     data: result,
   });
 });

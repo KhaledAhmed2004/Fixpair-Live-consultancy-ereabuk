@@ -38,6 +38,20 @@ router.get(
   PaymentController.getPaymentMethods,
 );
 
+router.delete(
+  '/methods/:paymentMethodId',
+  auth(USER_ROLES.USER, USER_ROLES.CONSULTANT),
+  validateRequest(PaymentValidation.deletePaymentMethodZodSchema),
+  PaymentController.deletePaymentMethod,
+);
+
+router.post(
+  '/detach-method',
+  auth(USER_ROLES.USER, USER_ROLES.CONSULTANT),
+  validateRequest(PaymentValidation.detachPaymentMethodZodSchema),
+  PaymentController.deletePaymentMethod,
+);
+
 // Invoice routes
 router.get(
   '/invoice/:consultationId',

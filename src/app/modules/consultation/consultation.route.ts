@@ -59,6 +59,18 @@ router.get(
   ConsultationController.getMyUnavailability,
 );
 
+router.delete(
+  '/unavailability/:slotId',
+  auth(USER_ROLES.CONSULTANT),
+  ConsultationController.removeUnavailability,
+);
+
+router.delete(
+  '/unavailability',
+  auth(USER_ROLES.CONSULTANT),
+  ConsultationController.removeUnavailability,
+);
+
 // User: View unavailable and booked slots for a consultant
 router.get(
   '/available-slots/:consultantId',
@@ -84,6 +96,19 @@ router.get(
     USER_ROLES.SUPER_ADMIN,
   ),
   ConsultationController.getMyBookings,
+);
+
+// User/Consultant: View their appointments (scheduled & callback requests)
+router.get(
+  '/my-appointments',
+  auth(
+    USER_ROLES.USER,
+    USER_ROLES.CONSULTANT,
+    USER_ROLES.ADMIN,
+    USER_ROLES.SUPER_ADMIN,
+  ),
+  validateRequest(ConsultationValidation.getMyAppointmentsZodSchema),
+  ConsultationController.getMyAppointments,
 );
 
 // Consultant/Admin: Update booking status

@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "lint:check": "eslint --ignore-path .eslintignore --ext .js,.ts",
     "lint:fix": "eslint . --fix",
@@ -56,6 +57,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@google/genai": "^2.19.0",
     "@paypal/checkout-server-sdk": "^1.0.3",
     "@types/paypal__checkout-server-sdk": "^1.0.8",
     "agora-token": "^2.0.5",

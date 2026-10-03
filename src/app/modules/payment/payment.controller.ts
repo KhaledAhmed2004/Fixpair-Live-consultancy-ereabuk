@@ -168,6 +168,92 @@ const getPaymentMethods = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+const deletePaymentMethod = catchAsync(async (req: Request, res: Response) => {
+  const user = req.user as any;
+  const paymentMethodId = req.params.paymentMethodId || req.body.paymentMethodId;
+
+  if (!paymentMethodId) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'paymentMethodId is required',
+    );
+  }
+
+  const userData = await User.findById(user.id);
+  if (!userData) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+  }
+
+  const targetIndex = userData.paymentMethods?.findIndex(
+    m => m.methodId === paymentMethodId,
+  );
+
+  if (targetIndex === undefined || targetIndex === -1) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Payment method not found');
+  }
+
+  // Check if there is an active ongoing consultation billing
+  const activeConsultation = await Consultation.findOne({
+    user: user.id,
+    billingStatus: { $in: ['authorized', 'active'] },
+    status: { $in: ['in-progress', 'active'] },
+  });
+
+  if (activeConsultation) {
+    throw new ApiError(
+      StatusCodes.BAD_REQUEST,
+      'Cannot remove payment method while a consultation is actively in progress',
+    );
+  }
+
+  const targetMethod = userData.paymentMethods![targetIndex];
+
+  // If Stripe provider, detach from Stripe
+  if (targetMethod.provider === 'stripe') {
+    try {
+      await StripeService.detachPaymentMethod(paymentMethodId);
+    } catch (error: any) {
+      logger.warn(
+        `Stripe detach warning for ${paymentMethodId}: ${error.message}`,
+      );
+    }
+  }
+
+  const wasDefault = targetMethod.isDefault;
+  userData.paymentMethods!.splice(targetIndex, 1);
+
+  // If removed method was default and other methods remain, designate the first one as default
+  if (wasDefault && userData.paymentMethods!.length > 0) {
+    userData.paymentMethods![0].isDefault = true;
+
+    if (
+      userData.stripeCustomerId &&
+      userData.paymentMethods![0].provider === 'stripe'
+    ) {
+      try {
+        await StripeService.stripe.customers.update(userData.stripeCustomerId, {
+          invoice_settings: {
+            default_payment_method: userData.paymentMethods![0].methodId,
+          },
+        });
+      } catch (error: any) {
+        logger.warn(
+          `Failed to update default payment method in Stripe for customer ${userData.stripeCustomerId}: ${error.message}`,
+        );
+      }
+    }
+  }
+
+  await userData.save();
+
+  sendResponse(res, {
+    success: true,
+    statusCode: StatusCodes.OK,
+    message: 'Payment method removed successfully',
+    data: userData.paymentMethods || [],
+  });
+});
+
 const handleStripeWebhook = catchAsync(async (req: Request, res: Response) => {
   const sig = req.headers['stripe-signature'] as string;
   const webhookSecret = config.payment.stripe.webhookSecret;
@@ -269,5 +355,6 @@ export const PaymentController = {
   attachPaymentMethod,
   setDefaultPaymentMethod,
   getPaymentMethods,
+  deletePaymentMethod,
   handleStripeWebhook,
 };

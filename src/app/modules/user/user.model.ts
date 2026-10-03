@@ -124,7 +124,7 @@ const userSchema = new Schema<IUser, UserModal>(
     },
     deviceType: {
       type: String,
-      enum: ['android', 'ios'],
+      enum: ['android', 'ios', 'web'],
     },
     averageRating: {
       type: Number,

@@ -141,6 +141,12 @@ const consultationSchema = new Schema<IConsultation>(
       ref: 'User',
       default: null,
     },
+    aiSummary: {
+      overview: { type: String, default: null },
+      keyPoints: [{ type: String }],
+      actionItems: [{ type: String }],
+      recommendations: [{ type: String }],
+    },
   },
   { 
     timestamps: true,

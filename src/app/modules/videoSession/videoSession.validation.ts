@@ -29,8 +29,8 @@ const callActionZodSchema = z.object({
     sessionId: z.string({
       required_error: 'Session ID is required',
     }),
-    action: z.enum(['REJECT', 'CANCEL'], {
-      required_error: 'Action is required (REJECT or CANCEL)',
+    action: z.enum(['REJECT', 'CANCEL', 'END'], {
+      required_error: 'Action is required (REJECT, CANCEL, or END)',
     }),
   }),
 });

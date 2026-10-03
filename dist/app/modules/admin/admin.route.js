@@ -1,0 +1,26 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.AdminRoutes = void 0;
+const express_1 = __importDefault(require("express"));
+const user_1 = require("../../../enums/user");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const admin_controller_1 = require("./admin.controller");
+const admin_validation_1 = require("./admin.validation");
+const router = express_1.default.Router();
+router.get('/dashboard-summary', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), admin_controller_1.AdminController.getDashboardSummary);
+router.get('/consultation-trend', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), (0, validateRequest_1.default)(admin_validation_1.AdminValidation.monthsQueryZodSchema), admin_controller_1.AdminController.getConsultationTrend);
+router.get('/user-growth', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), (0, validateRequest_1.default)(admin_validation_1.AdminValidation.monthsQueryZodSchema), admin_controller_1.AdminController.getUserGrowth);
+router.get('/consultation-status-distribution', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), (0, validateRequest_1.default)(admin_validation_1.AdminValidation.monthsQueryZodSchema), admin_controller_1.AdminController.getConsultationStatusDistribution);
+router.get('/top-consultants', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), (0, validateRequest_1.default)(admin_validation_1.AdminValidation.topConsultantsQueryZodSchema), admin_controller_1.AdminController.getTopConsultants);
+router.get('/recent-activities', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), (0, validateRequest_1.default)(admin_validation_1.AdminValidation.recentActivitiesQueryZodSchema), admin_controller_1.AdminController.getRecentActivities);
+router.get('/recent-consultations', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), (0, validateRequest_1.default)(admin_validation_1.AdminValidation.recentConsultationsQueryZodSchema), admin_controller_1.AdminController.getRecentConsultations);
+router.get('/active-consultations', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), admin_controller_1.AdminController.getActiveConsultations);
+router.get('/revenue-summary', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), admin_controller_1.AdminController.getRevenueSummary);
+router.get('/transactions', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), admin_controller_1.AdminController.getAllTransactions);
+router.get('/revenue-trend', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), admin_controller_1.AdminController.getRevenueTrend);
+router.get('/monitor', (0, auth_1.default)(user_1.USER_ROLES.ADMIN, user_1.USER_ROLES.SUPER_ADMIN), admin_controller_1.AdminController.getSystemMonitor);
+exports.AdminRoutes = router;

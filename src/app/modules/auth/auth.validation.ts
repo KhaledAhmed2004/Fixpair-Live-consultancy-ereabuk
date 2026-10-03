@@ -11,6 +11,7 @@ const createLoginZodSchema = z.object({
   body: z.object({
     email: z.string({ required_error: 'Email is required' }),
     password: z.string({ required_error: 'Password is required' }),
+    rememberMe: z.boolean().optional(),
   }),
 });
 
@@ -59,6 +60,7 @@ const socialLoginZodSchema = z.object({
     provider: z.enum(['google', 'apple'], {
       required_error: 'Provider is required',
     }),
+    rememberMe: z.boolean().optional(),
   }),
 });
 

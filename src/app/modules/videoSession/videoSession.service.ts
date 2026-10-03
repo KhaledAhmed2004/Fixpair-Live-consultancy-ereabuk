@@ -109,21 +109,19 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
     consultantAvatar: consultantAvatar,
   };
 
-  if (recipient.role === 'CONSULTANT') {
-    // Case 1: Recipient is Web Consultant (Socket)
-    socketHelper.emitToUser(recipientId, 'incoming-call', {
+  // 1. Real-time signaling via Socket.io (for Desktop Web / Active clients)
+  socketHelper.emitToUser(recipientId, 'incoming-call', {
+    ...signalingData,
+    uid: recipientUid,
+  });
+
+  // 2. Push Notification via FCM (for Mobile and Desktop WebPush)
+  if (recipient.fcmTokens && recipient.fcmTokens.length > 0) {
+    await NotificationHelper.sendPushNotification(recipient.fcmTokens, {
+      type: 'INCOMING_CALL',
       ...signalingData,
-      uid: 2001,
-    });
-  } else if (recipient.role === 'USER') {
-    // Case 2: Recipient is Mobile Client (FCM)
-    if (recipient.fcmTokens && recipient.fcmTokens.length > 0) {
-      await NotificationHelper.sendPushNotification(recipient.fcmTokens, {
-        type: 'INCOMING_CALL',
-        ...signalingData,
-        uid: '1001', // FCM data must be strings
-      }).catch(err => console.error('FCM Error in session creation:', err));
-    }
+      uid: String(recipientUid), // FCM data values must be strings
+    }).catch(err => console.error('FCM Error in session creation:', err));
   }
 
   return { ...result.toObject(), uid };
@@ -135,6 +133,7 @@ import { NotificationHelper } from '../../../helpers/notification/notificationHe
 import { socketHelper } from '../../../helpers/socketHelper';
 import { User } from '../user/user.model';
 import { TranscriptionService } from '../transcription/transcription.service';
+import { ReportService } from '../report/report.service';
 
 const joinSession = async (user: JwtPayload, sessionId: string) => {
   const session = await VideoSession.findById(sessionId);
@@ -291,6 +290,40 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
     });
   }
 
+  // 4. Asynchronously generate AI consultation summary with Gemini
+  ReportService.generateOrGetAiSummary(session.consultation.toString()).catch(
+    (err) => {
+      console.error(
+        `Failed to generate AI summary for consultation ${session.consultation}:`,
+        err,
+      );
+    },
+  );
+
+  // Notify the other participant and the room that the session has ended
+  const recipientId =
+    user.id === session.user.toString()
+      ? session.consultant.toString()
+      : session.user.toString();
+
+  socketHelper.emitToUser(recipientId, 'call-ended', {
+    sessionId,
+    consultationId: session.consultation.toString(),
+    bookingId: session.consultation.toString(),
+    endedBy: user.id,
+  });
+
+  socketHelper.emitToRoom(
+    `consultation:${session.consultation}`,
+    'call-ended',
+    {
+      sessionId,
+      consultationId: session.consultation.toString(),
+      bookingId: session.consultation.toString(),
+      endedBy: user.id,
+    },
+  );
+
   return await VideoSession.findById(sessionId);
 };
 
@@ -322,8 +355,12 @@ const getMySessions = async (user: JwtPayload, query: Record<string, unknown>) =
 const handleCallAction = async (
   user: JwtPayload,
   sessionId: string,
-  action: 'REJECT' | 'CANCEL',
+  action: 'REJECT' | 'CANCEL' | 'END',
 ) => {
+  if (action === 'END') {
+    return await endSession(user, sessionId);
+  }
+
   const session = await VideoSession.findById(sessionId);
   if (!session) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Session not found');
@@ -351,13 +388,28 @@ const handleCallAction = async (
       cancelledAt: endedAt,
     });
 
-    // Notify the caller
-    socketHelper.emitToUser(recipientId, 'call-rejected', { sessionId });
+    // Notify the caller via user socket & room
+    socketHelper.emitToUser(recipientId, 'call-rejected', {
+      sessionId,
+      consultationId: session.consultation.toString(),
+      bookingId: session.consultation.toString(),
+    });
+    socketHelper.emitToRoom(
+      `consultation:${session.consultation}`,
+      'call-rejected',
+      {
+        sessionId,
+        consultationId: session.consultation.toString(),
+        bookingId: session.consultation.toString(),
+      },
+    );
+
     if (recipient?.fcmTokens && recipient.fcmTokens.length > 0) {
       await NotificationHelper.sendPushNotification(recipient.fcmTokens, {
         type: 'CALL_REJECTED',
         sessionId,
-      }).catch(err => console.error('FCM Error in REJECT:', err));
+        consultationId: session.consultation.toString(),
+      }).catch((err) => console.error('FCM Error in REJECT:', err));
     }
   } else if (action === 'CANCEL') {
     // Caller cancelled the call
@@ -367,20 +419,35 @@ const handleCallAction = async (
       endedAt,
       duration: 0,
     });
-    
+
     await Consultation.findByIdAndUpdate(session.consultation, {
       status: 'cancelled',
       terminationReason: 'manual',
       cancelledAt: endedAt,
     });
 
-    // Notify the recipient
-    socketHelper.emitToUser(recipientId, 'call-cancelled', { sessionId });
+    // Notify the recipient via user socket & room
+    socketHelper.emitToUser(recipientId, 'call-cancelled', {
+      sessionId,
+      consultationId: session.consultation.toString(),
+      bookingId: session.consultation.toString(),
+    });
+    socketHelper.emitToRoom(
+      `consultation:${session.consultation}`,
+      'call-cancelled',
+      {
+        sessionId,
+        consultationId: session.consultation.toString(),
+        bookingId: session.consultation.toString(),
+      },
+    );
+
     if (recipient?.fcmTokens && recipient.fcmTokens.length > 0) {
       await NotificationHelper.sendPushNotification(recipient.fcmTokens, {
         type: 'CALL_CANCELLED',
         sessionId,
-      }).catch(err => console.error('FCM Error in CANCEL:', err));
+        consultationId: session.consultation.toString(),
+      }).catch((err) => console.error('FCM Error in CANCEL:', err));
     }
   }
 

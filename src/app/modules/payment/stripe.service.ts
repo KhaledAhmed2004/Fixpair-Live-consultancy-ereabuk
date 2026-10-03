@@ -25,6 +25,10 @@ const attachPaymentMethod = async (customerId: string, paymentMethodId: string) 
   });
 };
 
+const detachPaymentMethod = async (paymentMethodId: string) => {
+  return await stripe.paymentMethods.detach(paymentMethodId);
+};
+
 const listCustomerPaymentMethods = async (customerId: string) => {
   return await stripe.paymentMethods.list({ customer: customerId, type: 'card' });
 };
@@ -116,6 +120,7 @@ export const StripeService = {
   stripe,
   createCustomer,
   attachPaymentMethod,
+  detachPaymentMethod,
   createCharge,
   authorizePayment,
   capturePayment,

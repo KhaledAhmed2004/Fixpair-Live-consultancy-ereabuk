@@ -18,6 +18,26 @@ const reportSchema = new Schema<IReport>(
       ref: 'User',
       required: true,
     },
+    summary: {
+      type: String,
+    },
+    keyPoints: [
+      {
+        type: String,
+      },
+    ],
+    stepsTaken: [
+      {
+        type: String,
+      },
+    ],
+    recommendedProducts: [
+      {
+        name: { type: String, required: true },
+        price: { type: Schema.Types.Mixed },
+        buyLink: { type: String },
+      },
+    ],
     conversation: {
       type: String,
       required: true,
@@ -41,6 +61,12 @@ const reportSchema = new Schema<IReport>(
     ],
     pdfUrl: {
       type: String,
+    },
+    aiSummary: {
+      overview: { type: String, default: null },
+      keyPoints: [{ type: String }],
+      actionItems: [{ type: String }],
+      recommendations: [{ type: String }],
     },
   },
   {

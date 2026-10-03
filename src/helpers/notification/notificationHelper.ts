@@ -59,37 +59,81 @@ const sendPushNotification = async (
 
   const isIncomingCall = data.type === 'INCOMING_CALL';
 
+  const callerDisplayName =
+    data.callerName || data.consultantName || 'Consultant';
+  const notificationTitle = isIncomingCall
+    ? 'Incoming Video Call'
+    : data.title || 'Notification';
+  const notificationBody = isIncomingCall
+    ? `${callerDisplayName} is calling you...`
+    : data.body || '';
+
   const message: admin.messaging.MulticastMessage = {
     tokens: tokenList,
-    ...(isIncomingCall ? {} : {
-      notification: {
-        title: data.title || 'Notification',
-        body: data.body || '',
-      }
-    }),
+    notification: {
+      title: notificationTitle,
+      body: notificationBody,
+    },
     data: {
       ...data,
       click_action: 'FLUTTER_NOTIFICATION_CLICK',
     },
     android: {
       priority: 'high',
-      ...(isIncomingCall ? {} : {
-        notification: {
-          channelId: 'default',
-          sound: 'default',
-        }
-      }),
+      notification: isIncomingCall
+        ? {
+            channelId: 'incoming_call',
+            priority: 'max',
+            defaultSound: true,
+            defaultVibrateTimings: true,
+          }
+        : {
+            channelId: 'default',
+            sound: 'default',
+          },
     },
     apns: {
       payload: {
-        aps: {
-          contentAvailable: true,
-          sound: 'default',
-        },
+        aps: isIncomingCall
+          ? {
+              alert: {
+                title: notificationTitle,
+                body: notificationBody,
+              },
+              sound: 'default',
+              badge: 1,
+              contentAvailable: true,
+            }
+          : {
+              contentAvailable: true,
+              sound: 'default',
+            },
       },
       headers: {
         'apns-priority': '10',
         'apns-push-type': 'alert',
+      },
+    },
+    webpush: {
+      headers: {
+        Urgency: 'high',
+      },
+      notification: {
+        title: isIncomingCall
+          ? `Incoming Call: ${data.callerName || data.consultantName || 'Someone is calling'}`
+          : (data.title || 'Notification'),
+        body: isIncomingCall
+          ? 'Click to answer the consultation call'
+          : (data.body || ''),
+        icon: data.callerAvatar || data.consultantAvatar || '/favicon.ico',
+        badge: '/favicon.ico',
+        requireInteraction: isIncomingCall,
+        tag: isIncomingCall ? (data.sessionId || 'call') : undefined,
+      },
+      fcmOptions: {
+        link: data.bookingId
+          ? `/consultation/${data.bookingId}`
+          : (data.sessionId ? `/consultation/session/${data.sessionId}` : '/'),
       },
     },
   };

@@ -42,6 +42,14 @@ export type IConsultation = {
   cancelledAt?: Date;
   cancelReason?: string;
   cancelledBy?: Types.ObjectId;
+  aiSummary?: {
+    overview: string;
+    keyPoints: string[];
+    actionItems: string[];
+    recommendations?: string[];
+  };
+  createdAt?: Date;
+  updatedAt?: Date;
 };
 
 export type IAvailability = {

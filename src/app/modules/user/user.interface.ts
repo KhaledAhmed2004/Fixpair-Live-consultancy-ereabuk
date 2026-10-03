@@ -11,6 +11,8 @@ export type IUser = {
   password?: string;
   location?: string;
   image?: string;
+  avatar?: string;
+  provider?: 'google' | 'apple' | 'email' | string;
   status: 'active' | 'blocked' | 'deleted';
   verified: boolean;
   firebaseUid?: string;
@@ -38,7 +40,7 @@ export type IUser = {
     lastOtpRequestTime: Date | null;
   };
   fcmTokens: string[];
-  deviceType?: 'android' | 'ios';
+  deviceType?: 'android' | 'ios' | 'web';
   averageRating?: number;
   totalReviews?: number;
   totalConsultations?: number;

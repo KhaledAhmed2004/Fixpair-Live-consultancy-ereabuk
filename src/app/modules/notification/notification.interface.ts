@@ -11,7 +11,16 @@ export type INotification = {
     | 'CONSULTATION_REMINDER'
     | 'CONSULTATION_REQUEST'
     | 'CONSULTATION_EXPIRED'
-    | 'SYSTEM';
+    | 'SYSTEM'
+    | 'NEW_BOOKING_REQUEST'
+    | 'INSTANT_CALL_REQUEST'
+    | 'BOOKING_CANCELLED'
+    | 'BOOKING_RESCHEDULED'
+    | 'NEW_REVIEW_RECEIVED'
+    | 'WITHDRAWAL_REQUEST'
+    | 'WITHDRAWAL_APPROVED'
+    | 'NEW_CONSULTANT_REGISTERED'
+    | 'DISPUTE_OPENED';
   relatedBooking?: Types.ObjectId;
   read: boolean;
   idempotencyKey?: string;

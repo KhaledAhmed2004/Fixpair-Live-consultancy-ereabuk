@@ -1,0 +1,20 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ConsultantOverviewRoutes = void 0;
+const express_1 = __importDefault(require("express"));
+const user_1 = require("../../../enums/user");
+const auth_1 = __importDefault(require("../../middlewares/auth"));
+const validateRequest_1 = __importDefault(require("../../middlewares/validateRequest"));
+const consultantOverview_controller_1 = require("./consultantOverview.controller");
+const consultantOverview_validation_1 = require("./consultantOverview.validation");
+const router = express_1.default.Router();
+router.get('/dashboard-summary', (0, auth_1.default)(user_1.USER_ROLES.CONSULTANT), consultantOverview_controller_1.ConsultantOverviewController.getDashboardSummary);
+router.get('/consultation-trend', (0, auth_1.default)(user_1.USER_ROLES.CONSULTANT), (0, validateRequest_1.default)(consultantOverview_validation_1.ConsultantOverviewValidation.daysQueryZodSchema), consultantOverview_controller_1.ConsultantOverviewController.getConsultationTrend);
+router.get('/my-ratings', (0, auth_1.default)(user_1.USER_ROLES.CONSULTANT), consultantOverview_controller_1.ConsultantOverviewController.getMyRatings);
+router.get('/recent-bookings', (0, auth_1.default)(user_1.USER_ROLES.CONSULTANT), (0, validateRequest_1.default)(consultantOverview_validation_1.ConsultantOverviewValidation.recentLimitQueryZodSchema), consultantOverview_controller_1.ConsultantOverviewController.getRecentBookings);
+router.get('/recent-feedback', (0, auth_1.default)(user_1.USER_ROLES.CONSULTANT), (0, validateRequest_1.default)(consultantOverview_validation_1.ConsultantOverviewValidation.recentLimitQueryZodSchema), consultantOverview_controller_1.ConsultantOverviewController.getRecentFeedback);
+router.get('/my-transactions', (0, auth_1.default)(user_1.USER_ROLES.CONSULTANT), consultantOverview_controller_1.ConsultantOverviewController.getMyTransactions);
+exports.ConsultantOverviewRoutes = router;

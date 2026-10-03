@@ -43,8 +43,8 @@ function colorizeJson(jsonObj: any): string {
 export function logApi(
   method: string,
   url: string,
-  requestData: RequestData,
-  responseData: any,
+  requestData?: RequestData | null,
+  responseData?: any,
   badge?: string,
   description?: string
 ) {

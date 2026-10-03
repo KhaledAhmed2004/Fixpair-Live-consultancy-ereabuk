@@ -196,5 +196,46 @@ Then the consultation status should successfully change to completed
       expect(res.body.success).toBe(true);
       expect(res.body.data.status).toBe('completed');
     });
+
+    it('should only return upcoming appointments by default, excluding completed ones', async () => {
+      // 1. Default call (upcoming): completed booking should NOT appear in upcoming list
+      const upcomingRes = await request(app)
+        .get('/api/v1/consultation/my-appointments?bookingType=scheduled')
+        .set('Authorization', `Bearer ${testUsers.normalUserToken}`);
+
+      expect(upcomingRes.status).toBe(StatusCodes.OK);
+      expect(upcomingRes.body.success).toBe(true);
+      expect(Array.isArray(upcomingRes.body.data)).toBe(true);
+
+      const inUpcoming = upcomingRes.body.data.find(
+        (b: any) => b._id === scheduledConsultationId,
+      );
+      expect(inUpcoming).toBeUndefined(); // Done/completed consultation is excluded from upcoming!
+
+      // 2. History call (tab=history): completed booking should appear here
+      const historyRes = await request(app)
+        .get('/api/v1/consultation/my-appointments?bookingType=scheduled&tab=history')
+        .set('Authorization', `Bearer ${testUsers.normalUserToken}`);
+
+      logApi(
+        'GET',
+        '/api/v1/consultation/my-appointments?bookingType=scheduled&tab=history',
+        { headers: { Authorization: 'Bearer ***' } },
+        historyRes.body,
+        'GET-MY-APPOINTMENTS-HISTORY',
+        'User retrieves completed/past appointment history',
+      );
+
+      expect(historyRes.status).toBe(StatusCodes.OK);
+      expect(historyRes.body.success).toBe(true);
+      expect(Array.isArray(historyRes.body.data)).toBe(true);
+
+      const inHistory = historyRes.body.data.find(
+        (b: any) => b._id === scheduledConsultationId,
+      );
+      expect(inHistory).toBeDefined();
+      expect(inHistory.status).toBe('completed');
+      expect(inHistory.bookingType).toBe('scheduled');
+    });
   });
 });

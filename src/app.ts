@@ -17,6 +17,7 @@ app.use(
     origin: [
       'http://localhost:3000',
       'http://localhost:3001',
+      'http://localhost:3002',
       'https://ereabook-updated-work.vercel.app',
       'https://www.ereabook-updated-work.vercel.app',
     ],
@@ -24,8 +25,8 @@ app.use(
   })
 );
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '1gb' }));
+app.use(express.urlencoded({ extended: true, limit: '1gb' }));
 
 //file retrieve
 app.use(express.static('uploads'));

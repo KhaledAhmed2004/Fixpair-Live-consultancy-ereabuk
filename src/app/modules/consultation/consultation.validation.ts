@@ -64,6 +64,20 @@ const cancelBookingZodSchema = z.object({
   }),
 });
 
+const getMyAppointmentsZodSchema = z.object({
+  query: z
+    .object({
+      bookingType: z.string().optional(),
+      status: z.string().optional(),
+      tab: z.enum(['upcoming', 'requests', 'history', 'all']).optional(),
+      page: z.string().optional(),
+      limit: z.string().optional(),
+      sort: z.string().optional(),
+      searchTerm: z.string().optional(),
+    })
+    .optional(),
+});
+
 export const ConsultationValidation = {
   setUnavailabilityZodSchema,
   getAvailableSlotsZodSchema,
@@ -71,4 +85,5 @@ export const ConsultationValidation = {
   updateBookingStatusZodSchema,
   rescheduleBookingZodSchema,
   cancelBookingZodSchema,
+  getMyAppointmentsZodSchema,
 };

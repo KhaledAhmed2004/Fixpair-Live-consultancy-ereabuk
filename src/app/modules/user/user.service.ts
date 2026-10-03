@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import bcrypt from 'bcrypt';
 import { StatusCodes } from 'http-status-codes';
 import mongoose from 'mongoose';
 import { JwtPayload } from 'jsonwebtoken';
+import config from '../../../config';
 import { USER_ROLES } from '../../../enums/user';
 import ApiError from '../../../errors/ApiError';
 import { emailHelper } from '../../../helpers/emailHelper';
@@ -16,6 +18,7 @@ import { ConsultantOverviewService } from '../consultantOverview/consultantOverv
 import { cacheHelper } from '../../utils/cache';
 import { ConsultancyType } from '../consultancyType/consultancyType.model';
 import { NotificationService } from '../notification/notification.service';
+import { socketHelper } from '../../../helpers/socketHelper';
 
 const getAllUsersToDB = async (query: Record<string, unknown>) => {
   const userQuery = new QueryBuilder(
@@ -152,6 +155,7 @@ const updateProfileToDB = async (
     'paypalPayerId',
     'authentication',
     'fcmTokens',
+    'password',
   ];
   protectedFields.forEach(field => {
     delete (payload as any)[field];
@@ -207,6 +211,14 @@ const updateUserToDB = async (
     if (isExistUser.image) {
       unlinkFile(isExistUser.image);
     }
+  }
+
+  // Hash password if provided by admin
+  if (payload.password) {
+    payload.password = await bcrypt.hash(
+      payload.password,
+      Number(config.bcrypt_salt_rounds),
+    );
   }
 
   const updateDoc = await User.findOneAndUpdate({ _id: id }, payload, {
@@ -397,7 +409,7 @@ const updateDeviceTokenToDB = async (
   userId: string,
   payload: {
     deviceToken: string;
-    deviceType: 'android' | 'ios';
+    deviceType: 'android' | 'ios' | 'web';
     action?: 'add' | 'remove';
   },
 ) => {
@@ -441,6 +453,10 @@ const toggleStatusInDB = async (userId: string, activeStatus: boolean) => {
   if (user.role === 'CONSULTANT') {
     cacheHelper.clearByPrefix('consultants:recommended');
     cacheHelper.clearByPrefix('consultants:list');
+    socketHelper.broadcastAll('consultant:status-changed', {
+      consultantId: userId,
+      activeStatus: user.activeStatus,
+    });
   }
 
   return user;

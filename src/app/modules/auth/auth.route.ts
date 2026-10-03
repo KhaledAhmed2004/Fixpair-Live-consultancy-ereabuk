@@ -60,4 +60,15 @@ router.post(
   AuthController.refreshToken,
 );
 
+router.post(
+  '/logout',
+  auth(
+    USER_ROLES.SUPER_ADMIN,
+    USER_ROLES.ADMIN,
+    USER_ROLES.USER,
+    USER_ROLES.CONSULTANT,
+  ),
+  AuthController.logoutUser,
+);
+
 export const AuthRoutes = router;

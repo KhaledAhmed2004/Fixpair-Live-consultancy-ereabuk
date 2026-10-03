@@ -52,7 +52,7 @@ const updateUserZodSchema = z.object({
 const deviceTokenZodSchema = z.object({
   body: z.object({
     deviceToken: z.string({ required_error: 'Device token is required' }),
-    deviceType: z.enum(['android', 'ios'], {
+    deviceType: z.enum(['android', 'ios', 'web'], {
       required_error: 'Device type is required',
     }),
     action: z.enum(['add', 'remove']).default('add'),

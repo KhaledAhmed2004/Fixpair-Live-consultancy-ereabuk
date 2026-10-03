@@ -8,6 +8,24 @@ const getInvoiceZodSchema = z.object({
   }),
 });
 
+const deletePaymentMethodZodSchema = z.object({
+  params: z.object({
+    paymentMethodId: z.string({
+      required_error: 'Payment Method ID is required',
+    }),
+  }),
+});
+
+const detachPaymentMethodZodSchema = z.object({
+  body: z.object({
+    paymentMethodId: z.string({
+      required_error: 'Payment Method ID is required',
+    }),
+  }),
+});
+
 export const PaymentValidation = {
   getInvoiceZodSchema,
+  deletePaymentMethodZodSchema,
+  detachPaymentMethodZodSchema,
 };

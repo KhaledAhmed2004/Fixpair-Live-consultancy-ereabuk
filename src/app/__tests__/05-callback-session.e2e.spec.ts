@@ -279,5 +279,44 @@ Then billing transactions should be recorded in the DB
       const booking = checkRes.body.data.find((b: any) => b._id === callbackConsultationId);
       expect(booking.status).toBe('completed');
     });
+
+    it('should correctly retrieve completed callback session via GET /my-appointments?bookingType=callback&tab=history', async () => {
+      // 1. Upcoming call (default): completed callback should NOT appear in upcoming list
+      const upcomingRes = await request(app)
+        .get('/api/v1/consultation/my-appointments?bookingType=callback')
+        .set('Authorization', `Bearer ${testUsers.normalUserToken}`);
+
+      expect(upcomingRes.status).toBe(StatusCodes.OK);
+      expect(upcomingRes.body.success).toBe(true);
+      const inUpcoming = upcomingRes.body.data.find(
+        (b: any) => b._id === callbackConsultationId,
+      );
+      expect(inUpcoming).toBeUndefined();
+
+      // 2. History call (tab=history): completed callback SHOULD appear
+      const historyRes = await request(app)
+        .get('/api/v1/consultation/my-appointments?bookingType=callback&tab=history')
+        .set('Authorization', `Bearer ${testUsers.normalUserToken}`);
+
+      logApi(
+        'GET',
+        '/api/v1/consultation/my-appointments?bookingType=callback&tab=history',
+        { headers: { Authorization: 'Bearer ***' } },
+        historyRes.body,
+        'GET-MY-APPOINTMENTS-CALLBACK-HISTORY',
+        'User retrieves completed callback consultation history',
+      );
+
+      expect(historyRes.status).toBe(StatusCodes.OK);
+      expect(historyRes.body.success).toBe(true);
+      expect(Array.isArray(historyRes.body.data)).toBe(true);
+
+      const inHistory = historyRes.body.data.find(
+        (b: any) => b._id === callbackConsultationId,
+      );
+      expect(inHistory).toBeDefined();
+      expect(inHistory.bookingType).toBe('callback');
+      expect(inHistory.status).toBe('completed');
+    });
   });
 });

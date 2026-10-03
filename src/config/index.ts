@@ -59,7 +59,15 @@ export default {
       intervalMs: Number(process.env.BILLING_INTERVAL_MS) || 60000,
     },
   },
+  socket: {
+    disconnectGracePeriodMs:
+      Number(process.env.SOCKET_DISCONNECT_GRACE_PERIOD_MS) || 60000,
+  },
   fcm: {
     serviceAccountBase64: process.env.FCM_SERVICE_ACCOUNT_BASE64 || '',
+  },
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY || '',
+    model: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
   },
 };

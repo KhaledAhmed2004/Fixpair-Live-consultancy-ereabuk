@@ -744,6 +744,23 @@ Then the session should end, transcription should stop, and billing should final
       expect(res.body.success).toBe(true);
       expect(res.body.data.status).toBe('ended');
     });
+
+    it('should support ending a video session using POST /api/v1/video-session/action with action: END', async () => {
+      const payload = {
+        sessionId,
+        action: 'END',
+      };
+
+      const res = await request(app)
+        .post('/api/v1/video-session/action')
+        .set('Authorization', `Bearer ${testUsers.consultantToken}`)
+        .send(payload);
+
+      expect(res.status).toBe(StatusCodes.OK);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.status).toBe('ended');
+    });
+
     it('should fetch the user\'s past video sessions history', async () => {
       console.info(`
 📝 USER STORY:
@@ -794,6 +811,22 @@ So that I only see consultations that are already completed/cancelled
       expect(res.body.success).toBe(true);
       expect(Array.isArray(res.body.data)).toBe(true);
       // It should ideally contain our consultation
+    });
+
+    it('should include past instant consultations in GET /my-appointments?tab=history', async () => {
+      const res = await request(app)
+        .get('/api/v1/consultation/my-appointments?tab=history')
+        .set('Authorization', `Bearer ${testUsers.normalUserToken}`);
+
+      expect(res.status).toBe(StatusCodes.OK);
+      expect(res.body.success).toBe(true);
+      expect(Array.isArray(res.body.data)).toBe(true);
+
+      const instantInHistory = res.body.data.find(
+        (b: any) => b._id === consultationId,
+      );
+      expect(instantInHistory).toBeDefined();
+      expect(instantInHistory.bookingType).toBe('instant');
     });
 
     it('should fetch the user\'s upcoming (pending/accepted) consultation bookings using status filter', async () => {
