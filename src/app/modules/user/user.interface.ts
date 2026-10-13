@@ -40,6 +40,7 @@ export type IUser = {
     lastOtpRequestTime: Date | null;
   };
   fcmTokens: string[];
+  voipToken?: string;
   deviceType?: 'android' | 'ios' | 'web';
   averageRating?: number;
   totalReviews?: number;

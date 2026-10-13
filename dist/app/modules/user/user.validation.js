@@ -50,12 +50,18 @@ const updateUserZodSchema = zod_1.z.object({
     activeStatus: zod_1.z.boolean().optional(),
 });
 const deviceTokenZodSchema = zod_1.z.object({
-    body: zod_1.z.object({
-        deviceToken: zod_1.z.string({ required_error: 'Device token is required' }),
+    body: zod_1.z
+        .object({
+        deviceToken: zod_1.z.string().optional(),
+        fcmToken: zod_1.z.string().optional(),
+        voipToken: zod_1.z.string().optional(),
         deviceType: zod_1.z.enum(['android', 'ios', 'web'], {
             required_error: 'Device type is required',
         }),
         action: zod_1.z.enum(['add', 'remove']).default('add'),
+    })
+        .refine(data => data.deviceToken || data.fcmToken || data.voipToken, {
+        message: 'Either deviceToken, fcmToken, or voipToken must be provided',
     }),
 });
 exports.UserValidation = {

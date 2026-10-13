@@ -134,6 +134,10 @@ const userSchema = new mongoose_1.Schema({
         type: [String],
         default: [],
     },
+    voipToken: {
+        type: String,
+        default: null,
+    },
     deviceType: {
         type: String,
         enum: ['android', 'ios', 'web'],

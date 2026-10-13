@@ -70,4 +70,13 @@ export default {
     apiKey: process.env.GEMINI_API_KEY || '',
     model: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
   },
+  apns: {
+    keyId: process.env.APNS_KEY_ID || 'F27ZS4U272',
+    teamId: process.env.APNS_TEAM_ID || 'XH9NDHRU5Z',
+    bundleId: process.env.APNS_BUNDLE_ID || 'com.fixpair.app',
+    topic: process.env.APNS_VOIP_TOPIC || 'com.fixpair.app.voip',
+    p8FilePath: process.env.APNS_P8_FILE_PATH || './certs/AuthKey_F27ZS4U272.p8',
+    isProduction: process.env.APNS_PRODUCTION === 'true',
+  },
 };
+

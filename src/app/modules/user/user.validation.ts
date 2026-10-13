@@ -50,13 +50,19 @@ const updateUserZodSchema = z.object({
 });
 
 const deviceTokenZodSchema = z.object({
-  body: z.object({
-    deviceToken: z.string({ required_error: 'Device token is required' }),
-    deviceType: z.enum(['android', 'ios', 'web'], {
-      required_error: 'Device type is required',
+  body: z
+    .object({
+      deviceToken: z.string().optional(),
+      fcmToken: z.string().optional(),
+      voipToken: z.string().optional(),
+      deviceType: z.enum(['android', 'ios', 'web'], {
+        required_error: 'Device type is required',
+      }),
+      action: z.enum(['add', 'remove']).default('add'),
+    })
+    .refine(data => data.deviceToken || data.fcmToken || data.voipToken, {
+      message: 'Either deviceToken, fcmToken, or voipToken must be provided',
     }),
-    action: z.enum(['add', 'remove']).default('add'),
-  }),
 });
 
 export const UserValidation = {

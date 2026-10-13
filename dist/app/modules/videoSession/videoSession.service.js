@@ -96,10 +96,25 @@ const createSession = (user, consultationId) => __awaiter(void 0, void 0, void 0
     };
     // 1. Real-time signaling via Socket.io (for Desktop Web / Active clients)
     socketHelper_1.socketHelper.emitToUser(recipientId, 'incoming-call', Object.assign(Object.assign({}, signalingData), { uid: recipientUid }));
-    // 2. Push Notification via FCM (for Mobile and Desktop WebPush)
-    if (recipient.fcmTokens && recipient.fcmTokens.length > 0) {
-        yield notificationHelper_1.NotificationHelper.sendPushNotification(recipient.fcmTokens, Object.assign(Object.assign({ type: 'INCOMING_CALL' }, signalingData), { uid: String(recipientUid) })).catch(err => console.error('FCM Error in session creation:', err));
-    }
+    // 2. Incoming Call Push Notification (APNs VoIP for iOS & High-Priority Data for Android)
+    yield notificationHelper_1.NotificationHelper.sendIncomingCallNotification({
+        recipient: {
+            userId: recipient._id.toString(),
+            deviceType: recipient.deviceType,
+            fcmTokens: recipient.fcmTokens,
+            voipToken: recipient.voipToken,
+        },
+        sessionData: {
+            sessionId: result._id.toString(),
+            agoraToken: recipientToken,
+            channelName: result.channelName,
+            callerName: signalingData.callerName,
+            callerAvatar: signalingData.callerAvatar,
+            bookingId: consultationId,
+            consultantName: signalingData.consultantName,
+            consultantAvatar: signalingData.consultantAvatar,
+        },
+    }).catch(err => console.error('Error in sendIncomingCallNotification:', err));
     return Object.assign(Object.assign({}, result.toObject()), { uid });
 });
 const billing_service_1 = require("../payment/billing.service");
@@ -300,12 +315,17 @@ const handleCallAction = (user, sessionId, action) => __awaiter(void 0, void 0, 
             consultationId: session.consultation.toString(),
             bookingId: session.consultation.toString(),
         });
-        if ((recipient === null || recipient === void 0 ? void 0 : recipient.fcmTokens) && recipient.fcmTokens.length > 0) {
-            yield notificationHelper_1.NotificationHelper.sendPushNotification(recipient.fcmTokens, {
-                type: 'CALL_REJECTED',
+        if (recipient) {
+            yield notificationHelper_1.NotificationHelper.sendCallCancellationNotification({
+                recipient: {
+                    userId: recipient._id.toString(),
+                    deviceType: recipient.deviceType,
+                    fcmTokens: recipient.fcmTokens,
+                    voipToken: recipient.voipToken,
+                },
                 sessionId,
-                consultationId: session.consultation.toString(),
-            }).catch((err) => console.error('FCM Error in REJECT:', err));
+                status: 'rejected',
+            }).catch((err) => console.error('Error in sendCallCancellationNotification (REJECT):', err));
         }
     }
     else if (action === 'CANCEL') {
@@ -332,12 +352,17 @@ const handleCallAction = (user, sessionId, action) => __awaiter(void 0, void 0, 
             consultationId: session.consultation.toString(),
             bookingId: session.consultation.toString(),
         });
-        if ((recipient === null || recipient === void 0 ? void 0 : recipient.fcmTokens) && recipient.fcmTokens.length > 0) {
-            yield notificationHelper_1.NotificationHelper.sendPushNotification(recipient.fcmTokens, {
-                type: 'CALL_CANCELLED',
+        if (recipient) {
+            yield notificationHelper_1.NotificationHelper.sendCallCancellationNotification({
+                recipient: {
+                    userId: recipient._id.toString(),
+                    deviceType: recipient.deviceType,
+                    fcmTokens: recipient.fcmTokens,
+                    voipToken: recipient.voipToken,
+                },
                 sessionId,
-                consultationId: session.consultation.toString(),
-            }).catch((err) => console.error('FCM Error in CANCEL:', err));
+                status: 'cancelled',
+            }).catch((err) => console.error('Error in sendCallCancellationNotification (CANCEL):', err));
         }
     }
     return { success: true };

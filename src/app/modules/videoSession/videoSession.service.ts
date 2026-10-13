@@ -115,14 +115,25 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
     uid: recipientUid,
   });
 
-  // 2. Push Notification via FCM (for Mobile and Desktop WebPush)
-  if (recipient.fcmTokens && recipient.fcmTokens.length > 0) {
-    await NotificationHelper.sendPushNotification(recipient.fcmTokens, {
-      type: 'INCOMING_CALL',
-      ...signalingData,
-      uid: String(recipientUid), // FCM data values must be strings
-    }).catch(err => console.error('FCM Error in session creation:', err));
-  }
+  // 2. Incoming Call Push Notification (APNs VoIP for iOS & High-Priority Data for Android)
+  await NotificationHelper.sendIncomingCallNotification({
+    recipient: {
+      userId: recipient._id.toString(),
+      deviceType: recipient.deviceType,
+      fcmTokens: recipient.fcmTokens,
+      voipToken: recipient.voipToken,
+    },
+    sessionData: {
+      sessionId: result._id.toString(),
+      agoraToken: recipientToken,
+      channelName: result.channelName,
+      callerName: signalingData.callerName,
+      callerAvatar: signalingData.callerAvatar,
+      bookingId: consultationId,
+      consultantName: signalingData.consultantName,
+      consultantAvatar: signalingData.consultantAvatar,
+    },
+  }).catch(err => console.error('Error in sendIncomingCallNotification:', err));
 
   return { ...result.toObject(), uid };
 };
@@ -404,12 +415,17 @@ const handleCallAction = async (
       },
     );
 
-    if (recipient?.fcmTokens && recipient.fcmTokens.length > 0) {
-      await NotificationHelper.sendPushNotification(recipient.fcmTokens, {
-        type: 'CALL_REJECTED',
+    if (recipient) {
+      await NotificationHelper.sendCallCancellationNotification({
+        recipient: {
+          userId: recipient._id.toString(),
+          deviceType: recipient.deviceType,
+          fcmTokens: recipient.fcmTokens,
+          voipToken: recipient.voipToken,
+        },
         sessionId,
-        consultationId: session.consultation.toString(),
-      }).catch((err) => console.error('FCM Error in REJECT:', err));
+        status: 'rejected',
+      }).catch((err) => console.error('Error in sendCallCancellationNotification (REJECT):', err));
     }
   } else if (action === 'CANCEL') {
     // Caller cancelled the call
@@ -442,12 +458,17 @@ const handleCallAction = async (
       },
     );
 
-    if (recipient?.fcmTokens && recipient.fcmTokens.length > 0) {
-      await NotificationHelper.sendPushNotification(recipient.fcmTokens, {
-        type: 'CALL_CANCELLED',
+    if (recipient) {
+      await NotificationHelper.sendCallCancellationNotification({
+        recipient: {
+          userId: recipient._id.toString(),
+          deviceType: recipient.deviceType,
+          fcmTokens: recipient.fcmTokens,
+          voipToken: recipient.voipToken,
+        },
         sessionId,
-        consultationId: session.consultation.toString(),
-      }).catch((err) => console.error('FCM Error in CANCEL:', err));
+        status: 'cancelled',
+      }).catch((err) => console.error('Error in sendCallCancellationNotification (CANCEL):', err));
     }
   }
 

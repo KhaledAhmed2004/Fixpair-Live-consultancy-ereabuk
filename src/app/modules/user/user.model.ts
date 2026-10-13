@@ -122,6 +122,10 @@ const userSchema = new Schema<IUser, UserModal>(
       type: [String],
       default: [],
     },
+    voipToken: {
+      type: String,
+      default: null,
+    },
     deviceType: {
       type: String,
       enum: ['android', 'ios', 'web'],

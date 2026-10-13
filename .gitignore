@@ -4,6 +4,9 @@ node_modules
 
 /winston
 /uploads
+/certs
+*.p8
+
 
 # VitePress
 docs/.vitepress/dist

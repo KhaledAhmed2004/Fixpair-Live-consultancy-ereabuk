@@ -408,23 +408,33 @@ const getConsultantsFromDB = async (query: Record<string, unknown>) => {
 const updateDeviceTokenToDB = async (
   userId: string,
   payload: {
-    deviceToken: string;
+    deviceToken?: string;
+    fcmToken?: string;
+    voipToken?: string;
     deviceType: 'android' | 'ios' | 'web';
     action?: 'add' | 'remove';
   },
 ) => {
-  const { deviceToken, deviceType, action = 'add' } = payload;
+  const token = payload.deviceToken || payload.fcmToken;
+  const { deviceType, action = 'add', voipToken } = payload;
 
-  let updateOperation;
+  const updateOperation: Record<string, any> = {};
+
   if (action === 'add') {
-    updateOperation = {
-      $addToSet: { fcmTokens: deviceToken },
-      $set: { deviceType },
-    };
+    updateOperation.$set = { deviceType };
+    if (voipToken) {
+      updateOperation.$set.voipToken = voipToken;
+    }
+    if (token) {
+      updateOperation.$addToSet = { fcmTokens: token };
+    }
   } else {
-    updateOperation = {
-      $pull: { fcmTokens: deviceToken },
-    };
+    if (token) {
+      updateOperation.$pull = { fcmTokens: token };
+    }
+    if (voipToken) {
+      updateOperation.$unset = { voipToken: 1 };
+    }
   }
 
   const result = await User.findByIdAndUpdate(userId, updateOperation, {

@@ -321,18 +321,25 @@ const getConsultantsFromDB = (query) => __awaiter(void 0, void 0, void 0, functi
     return response;
 });
 const updateDeviceTokenToDB = (userId, payload) => __awaiter(void 0, void 0, void 0, function* () {
-    const { deviceToken, deviceType, action = 'add' } = payload;
-    let updateOperation;
+    const token = payload.deviceToken || payload.fcmToken;
+    const { deviceType, action = 'add', voipToken } = payload;
+    const updateOperation = {};
     if (action === 'add') {
-        updateOperation = {
-            $addToSet: { fcmTokens: deviceToken },
-            $set: { deviceType },
-        };
+        updateOperation.$set = { deviceType };
+        if (voipToken) {
+            updateOperation.$set.voipToken = voipToken;
+        }
+        if (token) {
+            updateOperation.$addToSet = { fcmTokens: token };
+        }
     }
     else {
-        updateOperation = {
-            $pull: { fcmTokens: deviceToken },
-        };
+        if (token) {
+            updateOperation.$pull = { fcmTokens: token };
+        }
+        if (voipToken) {
+            updateOperation.$unset = { voipToken: 1 };
+        }
     }
     const result = yield user_model_1.User.findByIdAndUpdate(userId, updateOperation, {
         new: true,
