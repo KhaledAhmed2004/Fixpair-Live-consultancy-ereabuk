@@ -12,11 +12,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NotificationHelper = void 0;
+exports.NotificationHelper = exports.formatToUuid = void 0;
 /* eslint-disable no-console */
 /* eslint-disable no-undef */
 const node_apn_1 = __importDefault(require("@parse/node-apn"));
-const crypto_1 = __importDefault(require("crypto"));
 const firebase_admin_1 = __importDefault(require("firebase-admin"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -50,13 +49,14 @@ catch (error) {
     logger_1.logger.warn('! FCM features will be disabled. Check your FCM_SERVICE_ACCOUNT_BASE64 in .env');
 }
 // -------------------------------------------------------------
-// 2. Apple APNs Provider Initialization (for iOS VoIP PushKit)
+// 2. Apple APNs Provider Initialization (Dual: Production & Sandbox Fallback)
 // -------------------------------------------------------------
-let apnProvider = null;
+let primaryApnProvider = null;
+let fallbackApnProvider = null;
 try {
     const p8Path = path_1.default.resolve(config_1.default.apns.p8FilePath);
     if (fs_1.default.existsSync(p8Path) && config_1.default.apns.keyId && config_1.default.apns.teamId) {
-        apnProvider = new node_apn_1.default.Provider({
+        primaryApnProvider = new node_apn_1.default.Provider({
             token: {
                 key: p8Path,
                 keyId: config_1.default.apns.keyId,
@@ -64,7 +64,15 @@ try {
             },
             production: config_1.default.apns.isProduction,
         });
-        logger_1.logger.info(`✓ Apple APNs VoIP Provider initialized (${config_1.default.apns.isProduction ? 'Production' : 'Sandbox'})`);
+        fallbackApnProvider = new node_apn_1.default.Provider({
+            token: {
+                key: p8Path,
+                keyId: config_1.default.apns.keyId,
+                teamId: config_1.default.apns.teamId,
+            },
+            production: !config_1.default.apns.isProduction,
+        });
+        logger_1.logger.info(`✓ Apple APNs VoIP Provider initialized (Primary: ${config_1.default.apns.isProduction ? 'Production' : 'Sandbox'}, Fallback: ${!config_1.default.apns.isProduction ? 'Production' : 'Sandbox'})`);
     }
     else {
         logger_1.logger.warn(`! APNs AuthKey file not found at ${p8Path} or KeyId/TeamId missing. iOS VoIP pushes disabled.`);
@@ -73,6 +81,17 @@ try {
 catch (error) {
     logger_1.errorLogger.error('Failed to initialize APNs Provider:', error);
 }
+const formatToUuid = (id) => {
+    if (!id)
+        return '00000000-0000-0000-0000-000000000000';
+    const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    if (uuidRegex.test(id))
+        return id;
+    const clean = id.replace(/[^0-9a-fA-F]/g, '');
+    const padded = (clean + '00000000000000000000000000000000').substring(0, 32);
+    return `${padded.substring(0, 8)}-${padded.substring(8, 12)}-${padded.substring(12, 16)}-${padded.substring(16, 20)}-${padded.substring(20, 32)}`;
+};
+exports.formatToUuid = formatToUuid;
 // -------------------------------------------------------------
 // 3. Platform-Specific Incoming Call Notification Engine
 // -------------------------------------------------------------
@@ -81,16 +100,20 @@ catch (error) {
  * and/or Android (FCM High-Priority Data-Only).
  */
 const sendIncomingCallNotification = (_a) => __awaiter(void 0, [_a], void 0, function* ({ recipient, sessionData, }) {
-    var _b, _c;
-    const callerDisplayName = sessionData.callerName || sessionData.consultantName || 'Consultant';
-    const callUuid = crypto_1.default.randomUUID();
+    var _b, _c, _d, _e, _f, _g;
+    const callerDisplayName = sessionData.callerName &&
+        sessionData.callerName !== 'A user' &&
+        sessionData.callerName !== 'User'
+        ? sessionData.callerName
+        : sessionData.consultantName || 'Consultant';
+    const callUuid = (0, exports.formatToUuid)(String(sessionData.sessionId));
     const results = {};
     // 🍎 iOS DEVICE: Direct APNs VoIP Push (PushKit & CallKit)
     if (recipient.deviceType === 'ios' || recipient.voipToken) {
         if (!recipient.voipToken) {
             logger_1.logger.warn(`[VoIP Warning] No VoIP token registered for iOS user: ${recipient.userId || 'unknown'}`);
         }
-        else if (!apnProvider) {
+        else if (!primaryApnProvider && !fallbackApnProvider) {
             logger_1.logger.warn('[VoIP Warning] APNs Provider is not initialized');
         }
         else {
@@ -117,9 +140,20 @@ const sendIncomingCallNotification = (_a) => __awaiter(void 0, [_a], void 0, fun
                 },
             };
             try {
-                const apnResult = yield apnProvider.send(notification, recipient.voipToken);
-                logger_1.logger.info(`✅ APNs VoIP Push sent: sent=${apnResult.sent.length}, failed=${apnResult.failed.length}`);
-                if (apnResult.failed.length > 0) {
+                let apnResult = null;
+                if (primaryApnProvider) {
+                    apnResult = yield primaryApnProvider.send(notification, recipient.voipToken);
+                }
+                // If primary failed (e.g. BadDeviceToken due to sandbox vs production mismatch), try fallback provider
+                if ((!apnResult || apnResult.failed.length > 0) && fallbackApnProvider) {
+                    logger_1.logger.info('🔄 Primary APNs failed or missed, attempting fallback APNs environment...');
+                    const fallbackResult = yield fallbackApnProvider.send(notification, recipient.voipToken);
+                    if (fallbackResult.sent.length > 0) {
+                        apnResult = fallbackResult;
+                    }
+                }
+                logger_1.logger.info(`✅ APNs VoIP Push sent: sent=${(_c = (_b = apnResult === null || apnResult === void 0 ? void 0 : apnResult.sent) === null || _b === void 0 ? void 0 : _b.length) !== null && _c !== void 0 ? _c : 0}, failed=${(_e = (_d = apnResult === null || apnResult === void 0 ? void 0 : apnResult.failed) === null || _d === void 0 ? void 0 : _d.length) !== null && _e !== void 0 ? _e : 0}`);
+                if (((_f = apnResult === null || apnResult === void 0 ? void 0 : apnResult.failed) === null || _f === void 0 ? void 0 : _f.length) > 0) {
                     logger_1.logger.warn(`APNs failure details: ${JSON.stringify(apnResult.failed)}`);
                 }
                 results.ios = apnResult;
@@ -129,23 +163,29 @@ const sendIncomingCallNotification = (_a) => __awaiter(void 0, [_a], void 0, fun
             }
         }
     }
-    // 🤖 ANDROID DEVICE: FCM High-Priority DATA-ONLY Push
-    if (recipient.deviceType === 'android' ||
-        (!recipient.deviceType && !recipient.voipToken && ((_b = recipient.fcmTokens) === null || _b === void 0 ? void 0 : _b.length))) {
-        const fcmTokens = (recipient.fcmTokens || []).filter(t => Boolean(t));
-        if (fcmTokens.length === 0) {
-            logger_1.logger.warn(`[FCM Warning] No FCM tokens found for user: ${recipient.userId || 'unknown'}`);
-        }
-        else if (!isFcmInitialized) {
+    // 🤖 FCM Push Notification (Android + iOS Fallback/Alert)
+    const fcmTokens = (recipient.fcmTokens || []).filter(t => Boolean(t));
+    if (fcmTokens.length > 0) {
+        if (!isFcmInitialized) {
             logger_1.logger.warn('[FCM Warning] Firebase Admin is not initialized');
         }
         else {
-            // CRITICAL: MUST NOT include 'notification' object to avoid suppressing custom background receiver
             const message = {
                 tokens: fcmTokens,
                 android: {
                     priority: 'high',
                     ttl: 30 * 1000, // 30 seconds
+                },
+                apns: {
+                    headers: {
+                        'apns-priority': '10',
+                        'apns-push-type': 'background',
+                    },
+                    payload: {
+                        aps: {
+                            'content-available': 1,
+                        },
+                    },
                 },
                 data: {
                     type: 'INCOMING_CALL',
@@ -160,16 +200,16 @@ const sendIncomingCallNotification = (_a) => __awaiter(void 0, [_a], void 0, fun
             };
             try {
                 const fcmResult = yield firebase_admin_1.default.messaging().sendEachForMulticast(message);
-                logger_1.logger.info(`✅ Android FCM Call Push sent: successCount=${fcmResult.successCount}`);
+                logger_1.logger.info(`✅ FCM Call Push sent: successCount=${fcmResult.successCount}, failureCount=${fcmResult.failureCount}`);
                 results.android = fcmResult;
             }
             catch (err) {
-                logger_1.errorLogger.error('❌ Failed to send Android FCM Call Push:', err);
+                logger_1.errorLogger.error('❌ Failed to send FCM Call Push:', err);
             }
         }
     }
     // 💻 DESKTOP WEB / WEBPUSH CLIENTS
-    if (recipient.deviceType === 'web' && ((_c = recipient.fcmTokens) === null || _c === void 0 ? void 0 : _c.length) && isFcmInitialized) {
+    if (recipient.deviceType === 'web' && ((_g = recipient.fcmTokens) === null || _g === void 0 ? void 0 : _g.length) && isFcmInitialized) {
         const webTokens = recipient.fcmTokens.filter(t => Boolean(t));
         if (webTokens.length > 0) {
             const webMessage = {
@@ -227,8 +267,9 @@ const sendIncomingCallNotification = (_a) => __awaiter(void 0, [_a], void 0, fun
  */
 const sendCallCancellationNotification = (_a) => __awaiter(void 0, [_a], void 0, function* ({ recipient, sessionId, status = 'cancelled', }) {
     const results = {};
+    const cancelCallUuid = (0, exports.formatToUuid)(String(sessionId));
     // 🍎 iOS: Send APNs VoIP Cancellation Push
-    if ((recipient.deviceType === 'ios' || recipient.voipToken) && recipient.voipToken && apnProvider) {
+    if ((recipient.deviceType === 'ios' || recipient.voipToken) && recipient.voipToken && (primaryApnProvider || fallbackApnProvider)) {
         const notification = new node_apn_1.default.Notification();
         notification.topic = config_1.default.apns.topic;
         notification.priority = 10;
@@ -236,7 +277,7 @@ const sendCallCancellationNotification = (_a) => __awaiter(void 0, [_a], void 0,
         notification.expiry = 0;
         notification.rawPayload = {
             aps: { 'content-available': 1 },
-            id: crypto_1.default.randomUUID(),
+            id: cancelCallUuid,
             type: 'CALL_CANCELLED',
             extra: {
                 sessionId: String(sessionId),
@@ -244,7 +285,14 @@ const sendCallCancellationNotification = (_a) => __awaiter(void 0, [_a], void 0,
             },
         };
         try {
-            results.ios = yield apnProvider.send(notification, recipient.voipToken);
+            let apnResult = null;
+            if (primaryApnProvider) {
+                apnResult = yield primaryApnProvider.send(notification, recipient.voipToken);
+            }
+            if ((!apnResult || apnResult.failed.length > 0) && fallbackApnProvider) {
+                apnResult = yield fallbackApnProvider.send(notification, recipient.voipToken);
+            }
+            results.ios = apnResult;
             logger_1.logger.info('✅ iOS VoIP Call Cancellation push sent');
         }
         catch (err) {

@@ -113,6 +113,57 @@ const socket = (io: Server) => {
       },
     );
 
+    // --- Socket-based Call Cancellation / Rejection Relay ---
+    socket.on('reject-call', async (data: { sessionId?: string; id?: string }) => {
+      const sessId = data?.sessionId || data?.id;
+      if (!sessId) return;
+      try {
+        let session = await VideoSession.findById(sessId);
+        if (!session) {
+          session = await VideoSession.findOne({ consultation: sessId });
+        }
+        if (!session) return;
+        const recipientId =
+          userId === session.user.toString()
+            ? session.consultant.toString()
+            : session.user.toString();
+        const payload = {
+          sessionId: session._id.toString(),
+          consultationId: session.consultation.toString(),
+          bookingId: session.consultation.toString(),
+        };
+        emitToUser(recipientId, 'call-rejected', payload);
+        emitToRoom(`consultation:${session.consultation}`, 'call-rejected', payload);
+      } catch (err) {
+        logger.error('Error in socket reject-call handler:', err);
+      }
+    });
+
+    socket.on('cancel-call', async (data: { sessionId?: string; id?: string }) => {
+      const sessId = data?.sessionId || data?.id;
+      if (!sessId) return;
+      try {
+        let session = await VideoSession.findById(sessId);
+        if (!session) {
+          session = await VideoSession.findOne({ consultation: sessId });
+        }
+        if (!session) return;
+        const recipientId =
+          userId === session.user.toString()
+            ? session.consultant.toString()
+            : session.user.toString();
+        const payload = {
+          sessionId: session._id.toString(),
+          consultationId: session.consultation.toString(),
+          bookingId: session.consultation.toString(),
+        };
+        emitToUser(recipientId, 'call-cancelled', payload);
+        emitToRoom(`consultation:${session.consultation}`, 'call-cancelled', payload);
+      } catch (err) {
+        logger.error('Error in socket cancel-call handler:', err);
+      }
+    });
+
     //disconnect
     socket.on('disconnect', () => {
       if (userId) {

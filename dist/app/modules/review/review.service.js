@@ -21,6 +21,7 @@ const review_model_1 = require("./review.model");
 const mongoose_1 = __importDefault(require("mongoose"));
 const user_model_1 = require("../user/user.model");
 const cache_1 = require("../../utils/cache");
+const notification_service_1 = require("../notification/notification.service");
 /**
  * Helper to update consultant precomputed stats
  */
@@ -81,6 +82,28 @@ const createReview = (user, payload) => __awaiter(void 0, void 0, void 0, functi
     const result = yield review_model_1.Review.create(reviewData);
     // Update consultant precomputed fields
     yield updateConsultantStats(consultation.consultant);
+    // Notify consultant about new review
+    try {
+        const reviewer = yield user_model_1.User.findById(user.id).select('name');
+        const reviewerName = (reviewer === null || reviewer === void 0 ? void 0 : reviewer.name) || 'A client';
+        const previewComment = comment.length > 60 ? `${comment.substring(0, 57)}...` : comment;
+        yield notification_service_1.NotificationService.sendNotification({
+            user: consultation.consultant.toString(),
+            title: 'New Review Received',
+            message: `${reviewerName} gave you a ${rating}-star rating: "${previewComment}"`,
+            type: 'NEW_REVIEW_RECEIVED',
+            relatedBooking: consultationId,
+            idempotencyKey: `review_${result._id}`,
+            metadata: {
+                rating,
+                reviewerName,
+                consultationId,
+            },
+        });
+    }
+    catch (notifErr) {
+        // Non-fatal
+    }
     return result;
 });
 const getReviewsByConsultant = (consultantId, query) => __awaiter(void 0, void 0, void 0, function* () {

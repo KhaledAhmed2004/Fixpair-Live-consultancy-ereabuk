@@ -84,26 +84,58 @@ const loginUserFromDB = (payload) => __awaiter(void 0, void 0, void 0, function*
 });
 //social login
 const socialLoginFromDB = (payload) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c;
     const { idToken, provider, rememberMe = false } = payload;
     try {
         // Verify the Firebase ID Token
         const decodedToken = yield firebase_admin_1.default.auth().verifyIdToken(idToken);
         // Extracted user details from Firebase token
         const firebaseUid = decodedToken.uid;
-        const email = decodedToken.email;
-        const name = decodedToken.name || ((_a = decodedToken.email) === null || _a === void 0 ? void 0 : _a.split('@')[0]) || 'User';
+        let email = payload.email || decodedToken.email;
+        let name = payload.name || decodedToken.name;
+        // If email is missing (standard with Apple Sign In), attempt to fetch from Firebase UserRecord
+        if (!email) {
+            try {
+                const userRecord = yield firebase_admin_1.default.auth().getUser(firebaseUid);
+                if (userRecord && userRecord.email) {
+                    email = userRecord.email;
+                }
+                if (!name && userRecord && userRecord.displayName) {
+                    name = userRecord.displayName;
+                }
+            }
+            catch (userRecordErr) {
+                console.warn('Could not fetch user record from Firebase:', userRecordErr);
+            }
+        }
+        // Fallback if still no email (Apple Private Relay / Hidden email):
+        if (!email) {
+            const appleSub = (_c = (_b = (_a = decodedToken.firebase) === null || _a === void 0 ? void 0 : _a.identities) === null || _b === void 0 ? void 0 : _b['apple.com']) === null || _c === void 0 ? void 0 : _c[0];
+            const identifier = appleSub || firebaseUid;
+            email = `apple_${identifier}@privaterelay.appleid.com`.toLowerCase();
+        }
+        if (!name) {
+            if (email.startsWith('apple_')) {
+                name = 'Apple User';
+            }
+            else {
+                name = email.split('@')[0] || 'User';
+            }
+        }
         const avatar = decodedToken.picture || '';
         // Database Sync Flow:
-        // 1. Check if user already exists in database by email or firebaseUid
+        // 1. Check if user already exists in database by firebaseUid or email
         let user = yield user_model_1.User.findOne({
-            $or: [{ email }, { firebaseUid }],
+            $or: [
+                { firebaseUid },
+                ...(email ? [{ email: email.toLowerCase() }] : []),
+            ],
         });
         if (!user) {
             // 2. If user does not exist, create a new record (Auto-Registration)
             user = yield user_model_1.User.create({
                 name,
-                email,
+                email: email.toLowerCase(),
                 firebaseUid,
                 avatar,
                 verified: true, // Social accounts are pre-verified
@@ -120,6 +152,16 @@ const socialLoginFromDB = (payload) => __awaiter(void 0, void 0, void 0, functio
             }
             if (user.provider !== provider) {
                 user.provider = provider;
+                isUpdated = true;
+            }
+            // If user had a generated placeholder name and a real name was provided
+            if (payload.name && (user.name.startsWith('apple_') || user.name === 'Apple User')) {
+                user.name = payload.name;
+                isUpdated = true;
+            }
+            // If user had a generated placeholder email and a real email was provided
+            if (payload.email && user.email.startsWith('apple_')) {
+                user.email = payload.email.toLowerCase();
                 isUpdated = true;
             }
             if (isUpdated) {

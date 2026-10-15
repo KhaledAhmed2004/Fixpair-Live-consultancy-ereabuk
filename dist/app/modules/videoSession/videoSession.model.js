@@ -48,6 +48,12 @@ const videoSessionSchema = new mongoose_1.Schema({
         enum: ['pending', 'starting', 'active', 'failed', 'stopping', 'stopped'],
         default: 'pending',
     },
+    joinedParticipants: [
+        {
+            type: mongoose_1.Schema.Types.ObjectId,
+            ref: 'User',
+        },
+    ],
 }, {
     timestamps: true,
     toJSON: {

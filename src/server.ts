@@ -47,7 +47,8 @@ async function main() {
     const io = new Server(server, {
       pingTimeout: 60000,
       cors: {
-        origin: '*',
+        origin: true,
+        credentials: true,
       },
     });
     socketHelper.socket(io);

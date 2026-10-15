@@ -51,7 +51,8 @@ function main() {
             const io = new socket_io_1.Server(server, {
                 pingTimeout: 60000,
                 cors: {
-                    origin: '*',
+                    origin: true,
+                    credentials: true,
                 },
             });
             socketHelper_1.socketHelper.socket(io);

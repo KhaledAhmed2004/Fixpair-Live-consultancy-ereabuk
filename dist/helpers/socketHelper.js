@@ -100,6 +100,59 @@ const socket = (io) => {
                 logger_1.logger.error('Transcription relay error:', error);
             }
         }));
+        // --- Socket-based Call Cancellation / Rejection Relay ---
+        socket.on('reject-call', (data) => __awaiter(void 0, void 0, void 0, function* () {
+            const sessId = (data === null || data === void 0 ? void 0 : data.sessionId) || (data === null || data === void 0 ? void 0 : data.id);
+            if (!sessId)
+                return;
+            try {
+                let session = yield videoSession_model_1.VideoSession.findById(sessId);
+                if (!session) {
+                    session = yield videoSession_model_1.VideoSession.findOne({ consultation: sessId });
+                }
+                if (!session)
+                    return;
+                const recipientId = userId === session.user.toString()
+                    ? session.consultant.toString()
+                    : session.user.toString();
+                const payload = {
+                    sessionId: session._id.toString(),
+                    consultationId: session.consultation.toString(),
+                    bookingId: session.consultation.toString(),
+                };
+                emitToUser(recipientId, 'call-rejected', payload);
+                emitToRoom(`consultation:${session.consultation}`, 'call-rejected', payload);
+            }
+            catch (err) {
+                logger_1.logger.error('Error in socket reject-call handler:', err);
+            }
+        }));
+        socket.on('cancel-call', (data) => __awaiter(void 0, void 0, void 0, function* () {
+            const sessId = (data === null || data === void 0 ? void 0 : data.sessionId) || (data === null || data === void 0 ? void 0 : data.id);
+            if (!sessId)
+                return;
+            try {
+                let session = yield videoSession_model_1.VideoSession.findById(sessId);
+                if (!session) {
+                    session = yield videoSession_model_1.VideoSession.findOne({ consultation: sessId });
+                }
+                if (!session)
+                    return;
+                const recipientId = userId === session.user.toString()
+                    ? session.consultant.toString()
+                    : session.user.toString();
+                const payload = {
+                    sessionId: session._id.toString(),
+                    consultationId: session.consultation.toString(),
+                    bookingId: session.consultation.toString(),
+                };
+                emitToUser(recipientId, 'call-cancelled', payload);
+                emitToRoom(`consultation:${session.consultation}`, 'call-cancelled', payload);
+            }
+            catch (err) {
+                logger_1.logger.error('Error in socket cancel-call handler:', err);
+            }
+        }));
         //disconnect
         socket.on('disconnect', () => {
             var _a, _b;

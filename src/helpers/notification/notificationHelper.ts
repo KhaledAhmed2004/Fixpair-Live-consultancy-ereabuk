@@ -45,14 +45,15 @@ try {
 }
 
 // -------------------------------------------------------------
-// 2. Apple APNs Provider Initialization (for iOS VoIP PushKit)
+// 2. Apple APNs Provider Initialization (Dual: Production & Sandbox Fallback)
 // -------------------------------------------------------------
-let apnProvider: apn.Provider | null = null;
+let primaryApnProvider: apn.Provider | null = null;
+let fallbackApnProvider: apn.Provider | null = null;
 
 try {
   const p8Path = path.resolve(config.apns.p8FilePath);
   if (fs.existsSync(p8Path) && config.apns.keyId && config.apns.teamId) {
-    apnProvider = new apn.Provider({
+    primaryApnProvider = new apn.Provider({
       token: {
         key: p8Path,
         keyId: config.apns.keyId,
@@ -60,8 +61,18 @@ try {
       },
       production: config.apns.isProduction,
     });
+
+    fallbackApnProvider = new apn.Provider({
+      token: {
+        key: p8Path,
+        keyId: config.apns.keyId,
+        teamId: config.apns.teamId,
+      },
+      production: !config.apns.isProduction,
+    });
+
     logger.info(
-      `✓ Apple APNs VoIP Provider initialized (${config.apns.isProduction ? 'Production' : 'Sandbox'})`,
+      `✓ Apple APNs VoIP Provider initialized (Primary: ${config.apns.isProduction ? 'Production' : 'Sandbox'}, Fallback: ${!config.apns.isProduction ? 'Production' : 'Sandbox'})`,
     );
   } else {
     logger.warn(
@@ -71,6 +82,16 @@ try {
 } catch (error) {
   errorLogger.error('Failed to initialize APNs Provider:', error);
 }
+
+export const formatToUuid = (id: string): string => {
+  if (!id) return '00000000-0000-0000-0000-000000000000';
+  const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  if (uuidRegex.test(id)) return id;
+
+  const clean = id.replace(/[^0-9a-fA-F]/g, '');
+  const padded = (clean + '00000000000000000000000000000000').substring(0, 32);
+  return `${padded.substring(0, 8)}-${padded.substring(8, 12)}-${padded.substring(12, 16)}-${padded.substring(16, 20)}-${padded.substring(20, 32)}`;
+};
 
 // -------------------------------------------------------------
 // Type Definitions
@@ -109,8 +130,12 @@ const sendIncomingCallNotification = async ({
   sessionData: IIncomingCallSessionData;
 }) => {
   const callerDisplayName =
-    sessionData.callerName || sessionData.consultantName || 'Consultant';
-  const callUuid = crypto.randomUUID();
+    sessionData.callerName &&
+    sessionData.callerName !== 'A user' &&
+    sessionData.callerName !== 'User'
+      ? sessionData.callerName
+      : sessionData.consultantName || 'Consultant';
+  const callUuid = formatToUuid(String(sessionData.sessionId));
 
   const results: { ios?: any; android?: any; web?: any } = {};
 
@@ -120,7 +145,7 @@ const sendIncomingCallNotification = async ({
       logger.warn(
         `[VoIP Warning] No VoIP token registered for iOS user: ${recipient.userId || 'unknown'}`,
       );
-    } else if (!apnProvider) {
+    } else if (!primaryApnProvider && !fallbackApnProvider) {
       logger.warn('[VoIP Warning] APNs Provider is not initialized');
     } else {
       const notification = new apn.Notification();
@@ -147,11 +172,24 @@ const sendIncomingCallNotification = async ({
       };
 
       try {
-        const apnResult = await apnProvider.send(notification, recipient.voipToken);
+        let apnResult: any = null;
+        if (primaryApnProvider) {
+          apnResult = await primaryApnProvider.send(notification, recipient.voipToken);
+        }
+
+        // If primary failed (e.g. BadDeviceToken due to sandbox vs production mismatch), try fallback provider
+        if ((!apnResult || apnResult.failed.length > 0) && fallbackApnProvider) {
+          logger.info('🔄 Primary APNs failed or missed, attempting fallback APNs environment...');
+          const fallbackResult = await fallbackApnProvider.send(notification, recipient.voipToken);
+          if (fallbackResult.sent.length > 0) {
+            apnResult = fallbackResult;
+          }
+        }
+
         logger.info(
-          `✅ APNs VoIP Push sent: sent=${apnResult.sent.length}, failed=${apnResult.failed.length}`,
+          `✅ APNs VoIP Push sent: sent=${apnResult?.sent?.length ?? 0}, failed=${apnResult?.failed?.length ?? 0}`,
         );
-        if (apnResult.failed.length > 0) {
+        if (apnResult?.failed?.length > 0) {
           logger.warn(`APNs failure details: ${JSON.stringify(apnResult.failed)}`);
         }
         results.ios = apnResult;
@@ -161,25 +199,28 @@ const sendIncomingCallNotification = async ({
     }
   }
 
-  // 🤖 ANDROID DEVICE: FCM High-Priority DATA-ONLY Push
-  if (
-    recipient.deviceType === 'android' ||
-    (!recipient.deviceType && !recipient.voipToken && recipient.fcmTokens?.length)
-  ) {
-    const fcmTokens = (recipient.fcmTokens || []).filter(t => Boolean(t));
-    if (fcmTokens.length === 0) {
-      logger.warn(
-        `[FCM Warning] No FCM tokens found for user: ${recipient.userId || 'unknown'}`,
-      );
-    } else if (!isFcmInitialized) {
+  // 🤖 FCM Push Notification (Android + iOS Fallback/Alert)
+  const fcmTokens = (recipient.fcmTokens || []).filter(t => Boolean(t));
+  if (fcmTokens.length > 0) {
+    if (!isFcmInitialized) {
       logger.warn('[FCM Warning] Firebase Admin is not initialized');
     } else {
-      // CRITICAL: MUST NOT include 'notification' object to avoid suppressing custom background receiver
       const message: admin.messaging.MulticastMessage = {
         tokens: fcmTokens,
         android: {
           priority: 'high',
           ttl: 30 * 1000, // 30 seconds
+        },
+        apns: {
+          headers: {
+            'apns-priority': '10',
+            'apns-push-type': 'background',
+          },
+          payload: {
+            aps: {
+              'content-available': 1,
+            },
+          },
         },
         data: {
           type: 'INCOMING_CALL',
@@ -195,10 +236,12 @@ const sendIncomingCallNotification = async ({
 
       try {
         const fcmResult = await admin.messaging().sendEachForMulticast(message);
-        logger.info(`✅ Android FCM Call Push sent: successCount=${fcmResult.successCount}`);
+        logger.info(
+          `✅ FCM Call Push sent: successCount=${fcmResult.successCount}, failureCount=${fcmResult.failureCount}`,
+        );
         results.android = fcmResult;
       } catch (err) {
-        errorLogger.error('❌ Failed to send Android FCM Call Push:', err);
+        errorLogger.error('❌ Failed to send FCM Call Push:', err);
       }
     }
   }
@@ -273,9 +316,10 @@ const sendCallCancellationNotification = async ({
   status?: string;
 }) => {
   const results: { ios?: any; android?: any } = {};
+  const cancelCallUuid = formatToUuid(String(sessionId));
 
   // 🍎 iOS: Send APNs VoIP Cancellation Push
-  if ((recipient.deviceType === 'ios' || recipient.voipToken) && recipient.voipToken && apnProvider) {
+  if ((recipient.deviceType === 'ios' || recipient.voipToken) && recipient.voipToken && (primaryApnProvider || fallbackApnProvider)) {
     const notification = new apn.Notification();
     notification.topic = config.apns.topic;
     notification.priority = 10;
@@ -283,7 +327,7 @@ const sendCallCancellationNotification = async ({
     notification.expiry = 0;
     notification.rawPayload = {
       aps: { 'content-available': 1 },
-      id: crypto.randomUUID(),
+      id: cancelCallUuid,
       type: 'CALL_CANCELLED',
       extra: {
         sessionId: String(sessionId),
@@ -292,7 +336,14 @@ const sendCallCancellationNotification = async ({
     };
 
     try {
-      results.ios = await apnProvider.send(notification, recipient.voipToken);
+      let apnResult: any = null;
+      if (primaryApnProvider) {
+        apnResult = await primaryApnProvider.send(notification, recipient.voipToken);
+      }
+      if ((!apnResult || apnResult.failed.length > 0) && fallbackApnProvider) {
+        apnResult = await fallbackApnProvider.send(notification, recipient.voipToken);
+      }
+      results.ios = apnResult;
       logger.info('✅ iOS VoIP Call Cancellation push sent');
     } catch (err) {
       errorLogger.error('❌ Failed to send iOS VoIP Cancellation push:', err);

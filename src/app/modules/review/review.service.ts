@@ -8,6 +8,7 @@ import { Review } from './review.model';
 import mongoose from 'mongoose';
 import { User } from '../user/user.model';
 import { cacheHelper } from '../../utils/cache';
+import { NotificationService } from '../notification/notification.service';
 
 /**
  * Helper to update consultant precomputed stats
@@ -95,6 +96,30 @@ const createReview = async (
 
   // Update consultant precomputed fields
   await updateConsultantStats(consultation.consultant);
+
+  // Notify consultant about new review
+  try {
+    const reviewer = await User.findById(user.id).select('name');
+    const reviewerName = reviewer?.name || 'A client';
+    const previewComment =
+      comment.length > 60 ? `${comment.substring(0, 57)}...` : comment;
+
+    await NotificationService.sendNotification({
+      user: consultation.consultant.toString(),
+      title: 'New Review Received',
+      message: `${reviewerName} gave you a ${rating}-star rating: "${previewComment}"`,
+      type: 'NEW_REVIEW_RECEIVED',
+      relatedBooking: consultationId,
+      idempotencyKey: `review_${result._id}`,
+      metadata: {
+        rating,
+        reviewerName,
+        consultationId,
+      },
+    });
+  } catch (notifErr) {
+    // Non-fatal
+  }
 
   return result;
 };

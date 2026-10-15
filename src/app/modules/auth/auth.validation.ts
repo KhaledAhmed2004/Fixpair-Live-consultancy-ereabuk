@@ -60,6 +60,8 @@ const socialLoginZodSchema = z.object({
     provider: z.enum(['google', 'apple'], {
       required_error: 'Provider is required',
     }),
+    email: z.string().email().optional(),
+    name: z.string().optional(),
     rememberMe: z.boolean().optional(),
   }),
 });

@@ -15,6 +15,13 @@ import { VideoSession } from './videoSession.model';
 import { IVideoSession } from './videoSession.interface';
 import { generateAgoraToken } from '../../../helpers/agoraTokenHelper';
 import { NotificationService } from '../notification/notification.service';
+import { BillingService } from '../payment/billing.service';
+import { InvoiceService } from '../payment/invoice.service';
+import { NotificationHelper } from '../../../helpers/notification/notificationHelper';
+import { socketHelper } from '../../../helpers/socketHelper';
+import { User } from '../user/user.model';
+import { TranscriptionService } from '../transcription/transcription.service';
+import { ReportService } from '../report/report.service';
 
 const createSession = async (user: JwtPayload, consultationId: string) => {
   const consultation = await Consultation.findById(consultationId);
@@ -43,35 +50,47 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
     );
   }
 
-  // Check if a session already exists for this consultation
-  const existingSession = await VideoSession.findOne({
-    consultation: consultationId,
-  });
-  if (existingSession) {
-    if (existingSession.status === 'ended') {
-      throw new ApiError(
-        StatusCodes.BAD_REQUEST,
-        'This consultation session has already ended',
-      );
-    }
-    return existingSession;
-  }
-
   const channelName = `consultation_${consultationId}`;
   // User UID: 1001, Consultant UID: 2001 as per requirement
   const uid = user.role === 'USER' ? 1001 : 2001;
   const token = generateAgoraToken(channelName, uid);
 
-  const sessionData: Partial<IVideoSession> = {
-    consultation: new mongoose.Types.ObjectId(consultationId),
-    user: consultation.user,
-    consultant: consultation.consultant,
-    channelName,
-    token,
-    status: 'pending',
-  };
+  // Check if a session already exists for this consultation
+  let result = await VideoSession.findOne({
+    consultation: consultationId,
+  });
 
-  const result = await VideoSession.create(sessionData);
+  if (result) {
+    if (result.status === 'ongoing') {
+      return { ...result.toObject(), uid };
+    }
+    if (result.status === 'ended' && consultation.status === 'completed') {
+      throw new ApiError(
+        StatusCodes.BAD_REQUEST,
+        'This consultation session has already ended',
+      );
+    }
+    // Re-use and reset session state for a fresh ringing call
+    result.status = 'pending';
+    result.startedAt = undefined;
+    result.endedAt = undefined;
+    result.duration = undefined;
+    result.joinedParticipants = [];
+    result.token = token;
+    result.channelName = channelName;
+    await result.save();
+  } else {
+    const sessionData: Partial<IVideoSession> = {
+      consultation: new mongoose.Types.ObjectId(consultationId),
+      user: consultation.user,
+      consultant: consultation.consultant,
+      channelName,
+      token,
+      status: 'pending',
+      joinedParticipants: [],
+    };
+    result = await VideoSession.create(sessionData);
+  }
 
   // --- Real-time Signaling ---
   const recipientId =
@@ -88,9 +107,25 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
   
   let consultantAvatar = consultantDetails?.image || consultantDetails?.avatar || '';
   if (consultantAvatar && !consultantAvatar.startsWith('http')) {
-    // Convert relative path to full URL
-    const baseUrl = process.env.BASE_URL || 'https://nayem5000.binarybards.online';
-    consultantAvatar = `${baseUrl}${consultantAvatar.startsWith('/') ? '' : '/'}${consultantAvatar}`;
+    // Convert relative path to full URL using config
+    const baseUrl = process.env.BASE_URL || config.ip_address || '';
+    consultantAvatar = baseUrl
+      ? `${baseUrl}${consultantAvatar.startsWith('/') ? '' : '/'}${consultantAvatar}`
+      : consultantAvatar;
+  }
+
+  // Fetch caller details from DB (JwtPayload only contains id, role, email)
+  const callerUser = await User.findById(user.id);
+  const callerName =
+    callerUser?.name ||
+    (user.role === 'CONSULTANT' ? consultantName : 'Fixpair User');
+
+  let callerAvatar = callerUser?.image || callerUser?.avatar || '';
+  if (callerAvatar && !callerAvatar.startsWith('http')) {
+    const baseUrl = process.env.BASE_URL || config.ip_address || '';
+    callerAvatar = baseUrl
+      ? `${baseUrl}${callerAvatar.startsWith('/') ? '' : '/'}${callerAvatar}`
+      : callerAvatar;
   }
 
   // Generate a token specifically for the recipient
@@ -99,8 +134,8 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
 
   const signalingData = {
     sessionId: result._id.toString(),
-    callerName: user.name || 'A user',
-    callerAvatar: user.image || user.avatar || '',
+    callerName,
+    callerAvatar,
     appId: config.agora.appId,
     token: recipientToken, // Send the recipient's specific token
     channelName: result.channelName,
@@ -138,19 +173,18 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
   return { ...result.toObject(), uid };
 };
 
-import { BillingService } from '../payment/billing.service';
-import { InvoiceService } from '../payment/invoice.service';
-import { NotificationHelper } from '../../../helpers/notification/notificationHelper';
-import { socketHelper } from '../../../helpers/socketHelper';
-import { User } from '../user/user.model';
-import { TranscriptionService } from '../transcription/transcription.service';
-import { ReportService } from '../report/report.service';
+
 
 const joinSession = async (user: JwtPayload, sessionId: string) => {
-  const session = await VideoSession.findById(sessionId);
+  let session = await VideoSession.findById(sessionId);
+  if (!session) {
+    session = await VideoSession.findOne({ consultation: sessionId });
+  }
   if (!session) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Video session not found');
   }
+
+  const actualSessionId = session._id.toString();
 
   if (session.status === 'ended') {
     throw new ApiError(
@@ -160,7 +194,6 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
   }
 
   const consultation = await Consultation.findById(session.consultation);
-
 
   // Verify that the user is part of the session
   if (
@@ -175,25 +208,46 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
 
   const uid = user.role === 'USER' ? 1001 : 2001;
 
-  if (session.status === 'pending') {
-    // Atomic update to prevent race conditions when both users join simultaneously
-    const updatedSession = await VideoSession.findOneAndUpdate(
-      { _id: sessionId, status: 'pending' },
+  // Track joined participants atomically
+  const updatedSession = await VideoSession.findByIdAndUpdate(
+    actualSessionId,
+    {
+      $addToSet: { joinedParticipants: new mongoose.Types.ObjectId(user.id) },
+    },
+    { new: true },
+  );
+
+  const participantIds = (updatedSession?.joinedParticipants || []).map(id =>
+    id.toString(),
+  );
+  const hasUserJoined = participantIds.includes(session.user.toString());
+  const hasConsultantJoined = participantIds.includes(
+    session.consultant.toString(),
+  );
+  const bothParticipantsJoined = hasUserJoined && hasConsultantJoined;
+
+  // Only transition to 'ongoing' and start billing when BOTH parties have joined the session
+  if (session.status === 'pending' && bothParticipantsJoined) {
+    const startedSession = await VideoSession.findOneAndUpdate(
+      { _id: actualSessionId, status: 'pending' },
       { status: 'ongoing', startedAt: new Date() },
       { new: true },
     );
 
-    if (updatedSession) {
-      // 1. Trigger billing first (this includes the 5-minute pre-auth check)
+    if (startedSession) {
+      // 1. Trigger billing only now that both parties are connected
       try {
         await BillingService.startBilling(session.consultation.toString());
         await mongoose.model('Consultation').updateOne(
           { _id: session.consultation },
-          { status: 'ongoing' }
+          { status: 'ongoing' },
         );
       } catch (error) {
         // If billing fails, revert status so it can be retried
-        await VideoSession.updateOne({ _id: sessionId }, { status: 'pending', startedAt: null });
+        await VideoSession.updateOne(
+          { _id: actualSessionId },
+          { status: 'pending', startedAt: null },
+        );
         throw error;
       }
 
@@ -201,22 +255,33 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
       TranscriptionService.startTranscription(session.consultation.toString())
         .catch(async (sttError) => {
           console.error('STT startup failed:', sttError);
-          await VideoSession.findByIdAndUpdate(sessionId, {
+          await VideoSession.findByIdAndUpdate(actualSessionId, {
             $set: { transcriptionStatus: 'failed' },
           });
           socketHelper.emitToUser(user.id, 'transcription-failed', {
-            sessionId,
+            sessionId: actualSessionId,
             consultationId: session.consultation.toString(),
-            message: 'Transcription could not be started. Billing continues normally.',
+            message:
+              'Transcription could not be started. Billing continues normally.',
           });
         });
+
+      // 3. Notify consultation room that call is now active and ongoing
+      socketHelper.emitToRoom(
+        `consultation:${session.consultation}`,
+        'call-accepted',
+        {
+          sessionId: actualSessionId,
+          consultationId: session.consultation.toString(),
+        },
+      );
     }
   }
 
   // Generate a fresh token for this specific user/UID
   const token = generateAgoraToken(session.channelName, uid);
 
-  const freshSession = await VideoSession.findById(sessionId);
+  const freshSession = await VideoSession.findById(actualSessionId);
 
   return {
     ...freshSession!.toObject(),
@@ -227,13 +292,18 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
 };
 
 const endSession = async (user: JwtPayload, sessionId: string) => {
-  const session = await VideoSession.findById(sessionId);
+  let session = await VideoSession.findById(sessionId);
+  if (!session) {
+    session = await VideoSession.findOne({ consultation: sessionId });
+  }
   if (!session) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Video session not found');
   }
 
+  const actualSessionId = session._id.toString();
+
   if (session.status === 'ended') {
-    return await VideoSession.findById(sessionId);
+    return await VideoSession.findById(actualSessionId);
   }
 
   // Verify that the user is part of the session
@@ -252,7 +322,7 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
     ? Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000)
     : 0;
 
-  await VideoSession.findByIdAndUpdate(sessionId, {
+  await VideoSession.findByIdAndUpdate(actualSessionId, {
     status: 'ended',
     endedAt,
     duration,
@@ -318,7 +388,7 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
       : session.user.toString();
 
   socketHelper.emitToUser(recipientId, 'call-ended', {
-    sessionId,
+    sessionId: actualSessionId,
     consultationId: session.consultation.toString(),
     bookingId: session.consultation.toString(),
     endedBy: user.id,
@@ -328,14 +398,14 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
     `consultation:${session.consultation}`,
     'call-ended',
     {
-      sessionId,
+      sessionId: actualSessionId,
       consultationId: session.consultation.toString(),
       bookingId: session.consultation.toString(),
       endedBy: user.id,
     },
   );
 
-  return await VideoSession.findById(sessionId);
+  return await VideoSession.findById(actualSessionId);
 };
 
 const getMySessions = async (user: JwtPayload, query: Record<string, unknown>) => {
@@ -372,10 +442,15 @@ const handleCallAction = async (
     return await endSession(user, sessionId);
   }
 
-  const session = await VideoSession.findById(sessionId);
+  let session = await VideoSession.findById(sessionId);
+  if (!session) {
+    session = await VideoSession.findOne({ consultation: sessionId });
+  }
   if (!session) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Session not found');
   }
+
+  const actualSessionId = session._id.toString();
 
   const recipientId =
     user.id === session.user.toString()
@@ -387,7 +462,7 @@ const handleCallAction = async (
   if (action === 'REJECT') {
     // Recipient rejected the call
     const endedAt = new Date();
-    await VideoSession.findByIdAndUpdate(sessionId, {
+    await VideoSession.findByIdAndUpdate(actualSessionId, {
       status: 'ended',
       endedAt,
       duration: 0,
@@ -399,9 +474,12 @@ const handleCallAction = async (
       cancelledAt: endedAt,
     });
 
+    // Stop any billing timers immediately if call is rejected
+    await BillingService.stopBilling(session.consultation.toString()).catch(() => null);
+
     // Notify the caller via user socket & room
     socketHelper.emitToUser(recipientId, 'call-rejected', {
-      sessionId,
+      sessionId: actualSessionId,
       consultationId: session.consultation.toString(),
       bookingId: session.consultation.toString(),
     });
@@ -409,7 +487,7 @@ const handleCallAction = async (
       `consultation:${session.consultation}`,
       'call-rejected',
       {
-        sessionId,
+        sessionId: actualSessionId,
         consultationId: session.consultation.toString(),
         bookingId: session.consultation.toString(),
       },
@@ -423,14 +501,14 @@ const handleCallAction = async (
           fcmTokens: recipient.fcmTokens,
           voipToken: recipient.voipToken,
         },
-        sessionId,
+        sessionId: actualSessionId,
         status: 'rejected',
       }).catch((err) => console.error('Error in sendCallCancellationNotification (REJECT):', err));
     }
   } else if (action === 'CANCEL') {
     // Caller cancelled the call
     const endedAt = new Date();
-    await VideoSession.findByIdAndUpdate(sessionId, {
+    await VideoSession.findByIdAndUpdate(actualSessionId, {
       status: 'ended',
       endedAt,
       duration: 0,
@@ -442,9 +520,12 @@ const handleCallAction = async (
       cancelledAt: endedAt,
     });
 
+    // Stop any billing timers immediately if call is cancelled
+    await BillingService.stopBilling(session.consultation.toString()).catch(() => null);
+
     // Notify the recipient via user socket & room
     socketHelper.emitToUser(recipientId, 'call-cancelled', {
-      sessionId,
+      sessionId: actualSessionId,
       consultationId: session.consultation.toString(),
       bookingId: session.consultation.toString(),
     });
@@ -452,7 +533,7 @@ const handleCallAction = async (
       `consultation:${session.consultation}`,
       'call-cancelled',
       {
-        sessionId,
+        sessionId: actualSessionId,
         consultationId: session.consultation.toString(),
         bookingId: session.consultation.toString(),
       },
@@ -466,7 +547,7 @@ const handleCallAction = async (
           fcmTokens: recipient.fcmTokens,
           voipToken: recipient.voipToken,
         },
-        sessionId,
+        sessionId: actualSessionId,
         status: 'cancelled',
       }).catch((err) => console.error('Error in sendCallCancellationNotification (CANCEL):', err));
     }
