@@ -59,7 +59,7 @@ const startTranscription = async (
       `${AGORA_STT_BASE_URL}/${appId}/join`,
       {
         name: `stt-${channelName}`,
-        languages: ['en-US'],
+        languages: ['de-DE', 'en-US'],
         maxIdleTime: 50,
         rtcConfig: {
           channelName,
