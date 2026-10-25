@@ -51,7 +51,14 @@ function main() {
             const io = new socket_io_1.Server(server, {
                 pingTimeout: 60000,
                 cors: {
-                    origin: '*',
+                    origin: [
+                        'http://localhost:3000',
+                        'http://localhost:3001',
+                        'http://localhost:3002',
+                        'https://ereabook-updated-work.vercel.app',
+                        'https://www.ereabook-updated-work.vercel.app',
+                    ],
+                    credentials: true,
                 },
             });
             socketHelper_1.socketHelper.socket(io);

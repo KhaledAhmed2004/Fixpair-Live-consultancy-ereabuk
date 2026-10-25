@@ -12,4 +12,5 @@ export type IVideoSession = {
   duration?: number; // Duration in minutes or seconds
   sttTaskId?: string;
   transcriptionStatus?: 'pending' | 'starting' | 'active' | 'failed' | 'stopping' | 'stopped';
+  joinedParticipants?: Types.ObjectId[];
 };

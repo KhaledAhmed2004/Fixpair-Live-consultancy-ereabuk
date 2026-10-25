@@ -77,11 +77,14 @@ const socket = (io: Server) => {
 
     // Join a consultation room so transcript:new events reach both participants
     // regardless of socket reconnections (room-based, not socket-ID-based).
-    socket.on('join-consultation', (consultationId: string) => {
-      socket.join(`consultation:${consultationId}`);
-      logger.info(
-        `Socket ${socket.id} joined room consultation:${consultationId}`,
-      );
+    socket.on('join-consultation', async (consultationId: string) => {
+      try {
+        const consultation = await Consultation.findById(consultationId);
+        if (!consultation || ![consultation.user.toString(), consultation.consultant.toString()].includes(userId)) return;
+        socket.join(`consultation:${consultationId}`);
+      } catch (error) {
+        logger.error('Could not join consultation room:', error);
+      }
     });
 
     // --- Live Transcription Relay (Option B) ---
@@ -91,7 +94,7 @@ const socket = (io: Server) => {
         try {
           const { sessionId, text } = data;
           const session = await VideoSession.findById(sessionId);
-          if (!session) return;
+          if (!session || ![session.user.toString(), session.consultant.toString()].includes(userId)) return;
 
           // Determine recipient (the opposite person in the session)
           const recipientId =
@@ -112,6 +115,57 @@ const socket = (io: Server) => {
         }
       },
     );
+
+    // --- Socket-based Call Cancellation / Rejection Relay ---
+    socket.on('reject-call', async (data: { sessionId?: string; id?: string }) => {
+      const sessId = data?.sessionId || data?.id;
+      if (!sessId) return;
+      try {
+        let session = await VideoSession.findById(sessId);
+        if (!session) {
+          session = await VideoSession.findOne({ consultation: sessId });
+        }
+        if (!session || ![session.user.toString(), session.consultant.toString()].includes(userId)) return;
+        const recipientId =
+          userId === session.user.toString()
+            ? session.consultant.toString()
+            : session.user.toString();
+        const payload = {
+          sessionId: session._id.toString(),
+          consultationId: session.consultation.toString(),
+          bookingId: session.consultation.toString(),
+        };
+        emitToUser(recipientId, 'call-rejected', payload);
+        emitToRoom(`consultation:${session.consultation}`, 'call-rejected', payload);
+      } catch (err) {
+        logger.error('Error in socket reject-call handler:', err);
+      }
+    });
+
+    socket.on('cancel-call', async (data: { sessionId?: string; id?: string }) => {
+      const sessId = data?.sessionId || data?.id;
+      if (!sessId) return;
+      try {
+        let session = await VideoSession.findById(sessId);
+        if (!session) {
+          session = await VideoSession.findOne({ consultation: sessId });
+        }
+        if (!session || ![session.user.toString(), session.consultant.toString()].includes(userId)) return;
+        const recipientId =
+          userId === session.user.toString()
+            ? session.consultant.toString()
+            : session.user.toString();
+        const payload = {
+          sessionId: session._id.toString(),
+          consultationId: session.consultation.toString(),
+          bookingId: session.consultation.toString(),
+        };
+        emitToUser(recipientId, 'call-cancelled', payload);
+        emitToRoom(`consultation:${session.consultation}`, 'call-cancelled', payload);
+      } catch (err) {
+        logger.error('Error in socket cancel-call handler:', err);
+      }
+    });
 
     //disconnect
     socket.on('disconnect', () => {
@@ -155,26 +209,16 @@ const socket = (io: Server) => {
                 });
 
                 for (const session of ongoingSessions) {
-                  const endedAt = new Date();
-                  const duration = session.startedAt ? Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000) : 0;
-                  
-                  // End the video session
-                  await VideoSession.findByIdAndUpdate(session._id, {
-                    status: 'cancelled',
-                    endedAt,
-                    duration,
-                    terminationReason: 'abnormal_disconnect'
-                  });
-
-                  // Cancel the consultation
-                  await Consultation.findByIdAndUpdate(session.consultation, {
-                    status: 'cancelled',
-                    cancelledAt: endedAt,
-                    terminationReason: 'abnormal_disconnect'
-                  });
+                  // Reuse normal teardown so billing holds and transcription are released.
+                  const { VideoSessionService } = await import('../app/modules/videoSession/videoSession.service');
+                  await VideoSessionService.endSession(
+                    { id: userId, role: userRole }, session._id.toString(),
+                  );
 
                   // Emit to room that session was force ended
                   emitToRoom(`consultation:${session.consultation}`, 'consultation-auto-ended', {
+                    sessionId: session._id.toString(),
+                    consultationId: session.consultation.toString(),
                     reason: 'abnormal_disconnect',
                     message: 'Session ended automatically due to participant disconnection.'
                   });
@@ -195,7 +239,7 @@ const socket = (io: Server) => {
                   });
                   await VideoSession.updateMany(
                     { consultation: pc._id, status: 'pending' },
-                    { status: 'cancelled', endedAt: new Date(), terminationReason: 'abnormal_disconnect' }
+                    { status: 'ended', endedAt: new Date(), terminationReason: 'abnormal_disconnect' }
                   );
                 }
               }

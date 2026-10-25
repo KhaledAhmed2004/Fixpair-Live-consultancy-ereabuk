@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -73,16 +106,23 @@ const socket = (io) => {
         }
         // Join a consultation room so transcript:new events reach both participants
         // regardless of socket reconnections (room-based, not socket-ID-based).
-        socket.on('join-consultation', (consultationId) => {
-            socket.join(`consultation:${consultationId}`);
-            logger_1.logger.info(`Socket ${socket.id} joined room consultation:${consultationId}`);
-        });
+        socket.on('join-consultation', (consultationId) => __awaiter(void 0, void 0, void 0, function* () {
+            try {
+                const consultation = yield consultation_model_1.Consultation.findById(consultationId);
+                if (!consultation || ![consultation.user.toString(), consultation.consultant.toString()].includes(userId))
+                    return;
+                socket.join(`consultation:${consultationId}`);
+            }
+            catch (error) {
+                logger_1.logger.error('Could not join consultation room:', error);
+            }
+        }));
         // --- Live Transcription Relay (Option B) ---
         socket.on('send-speech', (data) => __awaiter(void 0, void 0, void 0, function* () {
             try {
                 const { sessionId, text } = data;
                 const session = yield videoSession_model_1.VideoSession.findById(sessionId);
-                if (!session)
+                if (!session || ![session.user.toString(), session.consultant.toString()].includes(userId))
                     return;
                 // Determine recipient (the opposite person in the session)
                 const recipientId = userId === session.user.toString()
@@ -98,6 +138,59 @@ const socket = (io) => {
             }
             catch (error) {
                 logger_1.logger.error('Transcription relay error:', error);
+            }
+        }));
+        // --- Socket-based Call Cancellation / Rejection Relay ---
+        socket.on('reject-call', (data) => __awaiter(void 0, void 0, void 0, function* () {
+            const sessId = (data === null || data === void 0 ? void 0 : data.sessionId) || (data === null || data === void 0 ? void 0 : data.id);
+            if (!sessId)
+                return;
+            try {
+                let session = yield videoSession_model_1.VideoSession.findById(sessId);
+                if (!session) {
+                    session = yield videoSession_model_1.VideoSession.findOne({ consultation: sessId });
+                }
+                if (!session || ![session.user.toString(), session.consultant.toString()].includes(userId))
+                    return;
+                const recipientId = userId === session.user.toString()
+                    ? session.consultant.toString()
+                    : session.user.toString();
+                const payload = {
+                    sessionId: session._id.toString(),
+                    consultationId: session.consultation.toString(),
+                    bookingId: session.consultation.toString(),
+                };
+                emitToUser(recipientId, 'call-rejected', payload);
+                emitToRoom(`consultation:${session.consultation}`, 'call-rejected', payload);
+            }
+            catch (err) {
+                logger_1.logger.error('Error in socket reject-call handler:', err);
+            }
+        }));
+        socket.on('cancel-call', (data) => __awaiter(void 0, void 0, void 0, function* () {
+            const sessId = (data === null || data === void 0 ? void 0 : data.sessionId) || (data === null || data === void 0 ? void 0 : data.id);
+            if (!sessId)
+                return;
+            try {
+                let session = yield videoSession_model_1.VideoSession.findById(sessId);
+                if (!session) {
+                    session = yield videoSession_model_1.VideoSession.findOne({ consultation: sessId });
+                }
+                if (!session || ![session.user.toString(), session.consultant.toString()].includes(userId))
+                    return;
+                const recipientId = userId === session.user.toString()
+                    ? session.consultant.toString()
+                    : session.user.toString();
+                const payload = {
+                    sessionId: session._id.toString(),
+                    consultationId: session.consultation.toString(),
+                    bookingId: session.consultation.toString(),
+                };
+                emitToUser(recipientId, 'call-cancelled', payload);
+                emitToRoom(`consultation:${session.consultation}`, 'call-cancelled', payload);
+            }
+            catch (err) {
+                logger_1.logger.error('Error in socket cancel-call handler:', err);
             }
         }));
         //disconnect
@@ -139,23 +232,13 @@ const socket = (io) => {
                                     $or: [{ user: userId }, { consultant: userId }]
                                 });
                                 for (const session of ongoingSessions) {
-                                    const endedAt = new Date();
-                                    const duration = session.startedAt ? Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000) : 0;
-                                    // End the video session
-                                    yield videoSession_model_1.VideoSession.findByIdAndUpdate(session._id, {
-                                        status: 'cancelled',
-                                        endedAt,
-                                        duration,
-                                        terminationReason: 'abnormal_disconnect'
-                                    });
-                                    // Cancel the consultation
-                                    yield consultation_model_1.Consultation.findByIdAndUpdate(session.consultation, {
-                                        status: 'cancelled',
-                                        cancelledAt: endedAt,
-                                        terminationReason: 'abnormal_disconnect'
-                                    });
+                                    // Reuse normal teardown so billing holds and transcription are released.
+                                    const { VideoSessionService } = yield Promise.resolve().then(() => __importStar(require('../app/modules/videoSession/videoSession.service')));
+                                    yield VideoSessionService.endSession({ id: userId, role: userRole }, session._id.toString());
                                     // Emit to room that session was force ended
                                     emitToRoom(`consultation:${session.consultation}`, 'consultation-auto-ended', {
+                                        sessionId: session._id.toString(),
+                                        consultationId: session.consultation.toString(),
                                         reason: 'abnormal_disconnect',
                                         message: 'Session ended automatically due to participant disconnection.'
                                     });
@@ -172,7 +255,7 @@ const socket = (io) => {
                                         cancelledAt: new Date(),
                                         terminationReason: 'abnormal_disconnect',
                                     });
-                                    yield videoSession_model_1.VideoSession.updateMany({ consultation: pc._id, status: 'pending' }, { status: 'cancelled', endedAt: new Date(), terminationReason: 'abnormal_disconnect' });
+                                    yield videoSession_model_1.VideoSession.updateMany({ consultation: pc._id, status: 'pending' }, { status: 'ended', endedAt: new Date(), terminationReason: 'abnormal_disconnect' });
                                 }
                             }
                         }

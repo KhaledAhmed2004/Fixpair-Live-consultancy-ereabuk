@@ -104,6 +104,8 @@ const loginUserFromDB = async (payload: ILoginData) => {
 const socialLoginFromDB = async (payload: {
   idToken: string;
   provider: 'google' | 'apple';
+  email?: string;
+  name?: string;
   rememberMe?: boolean;
 }) => {
   const { idToken, provider, rememberMe = false } = payload;
@@ -114,22 +116,55 @@ const socialLoginFromDB = async (payload: {
 
     // Extracted user details from Firebase token
     const firebaseUid = decodedToken.uid;
-    const email = decodedToken.email;
-    const name =
-      decodedToken.name || decodedToken.email?.split('@')[0] || 'User';
+    let email = decodedToken.email_verified ? decodedToken.email : undefined;
+    let name = payload.name || decodedToken.name;
+
+    // If email is missing (standard with Apple Sign In), attempt to fetch from Firebase UserRecord
+    if (!email) {
+      try {
+        const userRecord = await admin.auth().getUser(firebaseUid);
+        if (userRecord && userRecord.email && userRecord.emailVerified) {
+          email = userRecord.email;
+        }
+        if (!name && userRecord && userRecord.displayName) {
+          name = userRecord.displayName;
+        }
+      } catch (userRecordErr) {
+        console.warn('Could not fetch user record from Firebase:', userRecordErr);
+      }
+    }
+
+    // Fallback if still no email (Apple Private Relay / Hidden email):
+    if (!email) {
+      const appleSub = (decodedToken as any).firebase?.identities?.['apple.com']?.[0];
+      const identifier = appleSub || firebaseUid;
+      email = `apple_${identifier}@privaterelay.appleid.com`.toLowerCase();
+    }
+
+    if (!name) {
+      if (email.startsWith('apple_')) {
+        name = 'Apple User';
+      } else {
+        name = email.split('@')[0] || 'User';
+      }
+    }
+
     const avatar = decodedToken.picture || '';
 
     // Database Sync Flow:
-    // 1. Check if user already exists in database by email or firebaseUid
+    // 1. Check if user already exists in database by firebaseUid or email
     let user = await User.findOne({
-      $or: [{ email }, { firebaseUid }],
+      $or: [
+        { firebaseUid },
+        ...(email ? [{ email: email.toLowerCase() }] : []),
+      ],
     });
 
     if (!user) {
       // 2. If user does not exist, create a new record (Auto-Registration)
       user = await User.create({
         name,
-        email,
+        email: email.toLowerCase(),
         firebaseUid,
         avatar,
         verified: true, // Social accounts are pre-verified
@@ -145,6 +180,16 @@ const socialLoginFromDB = async (payload: {
       }
       if (user.provider !== provider) {
         user.provider = provider;
+        isUpdated = true;
+      }
+      // If user had a generated placeholder name and a real name was provided
+      if (payload.name && (user.name.startsWith('apple_') || user.name === 'Apple User')) {
+        user.name = payload.name;
+        isUpdated = true;
+      }
+      // If user had a generated placeholder email and a real email was provided
+      if (email && user.email.startsWith('apple_')) {
+        user.email = email.toLowerCase();
         isUpdated = true;
       }
       if (isUpdated) {

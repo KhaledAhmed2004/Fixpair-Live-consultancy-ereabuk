@@ -48,6 +48,12 @@ const videoSessionSchema = new Schema<IVideoSession>(
       enum: ['pending', 'starting', 'active', 'failed', 'stopping', 'stopped'],
       default: 'pending',
     },
+    joinedParticipants: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
   },
   {
     timestamps: true,

@@ -61,6 +61,34 @@ describe('billing.concurrency', () => {
     await BillingService.stopBilling(currentConsultationId);
   });
 
+    it('does not retry a failed charge when the call ends', async () => {
+      await BillingService.startBilling(currentConsultationId);
+      const before = vi.mocked(StripeService.createCharge).mock.calls.length;
+      mockVideoSession.status = 'ended';
+      const charge = await BillingTransaction.findOne({ consultationId: currentConsultationId, billingMinute: 1, type: 'charge' });
+      charge!.status = 'failed';
+      await BillingService.stopBilling(currentConsultationId);
+      expect(StripeService.createCharge).toHaveBeenCalledTimes(before);
+    });
+
+    it('preserves failed billing status on repeated stop', async () => {
+      mockConsultation.billingStatus = 'failed';
+      mockConsultation.paymentStatus = 'failed';
+      await BillingService.stopBilling(currentConsultationId);
+      expect(mockConsultation.billingStatus).toBe('failed');
+      expect(mockConsultation.paymentStatus).toBe('failed');
+    });
+
+    it('does not mark an unresolved charge paid', async () => {
+      await BillingService.startBilling(currentConsultationId);
+      vi.mocked(BillingTransaction.find)
+        .mockResolvedValueOnce([{ amount: 7 }] as any)
+        .mockResolvedValueOnce([{ status: 'unknown' }] as any);
+      mockVideoSession.status = 'ended';
+      await BillingService.stopBilling(currentConsultationId);
+      expect(mockConsultation.paymentStatus).not.toBe('paid');
+    });
+
     it('Test 1: True Minute Boundary Async Race', async () => {
       console.info(`
 📝 USER STORY:
