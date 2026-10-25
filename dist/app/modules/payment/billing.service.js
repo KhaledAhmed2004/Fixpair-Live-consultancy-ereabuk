@@ -120,7 +120,7 @@ const startBilling = (consultationId) => __awaiter(void 0, void 0, void 0, funct
         }), config_1.default.payment.billing.intervalMs || 60000);
         activeTimers.set(consultationId, timer);
         // Initial charge for minute 1 upon connection
-        yield attemptMinuteCharge(consultationId, 1, consultation, true);
+        yield attemptMinuteCharge(consultationId, 1, consultation);
     }
     finally {
         billingLocks.delete(consultationId);
@@ -162,7 +162,7 @@ const processBillingIntervals = (consultationId) => __awaiter(void 0, void 0, vo
         }
     }
 });
-const attemptMinuteCharge = (consultationId_1, minute_1, consultation_1, ...args_1) => __awaiter(void 0, [consultationId_1, minute_1, consultation_1, ...args_1], void 0, function* (consultationId, minute, consultation, allowEndedSession = false) {
+const attemptMinuteCharge = (consultationId, minute, consultation) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e, _f;
     const chargeAmount = minute === 1
         ? consultation.platformFee + consultation.perMinuteRate
@@ -213,22 +213,12 @@ const attemptMinuteCharge = (consultationId_1, minute_1, consultation_1, ...args
         // Let's retry it.
     }
     if (ledgerRecord.status === 'processing' && !isNew) {
-        if (!allowEndedSession) {
-            const staleThresholdMs = 2 * 60 * 1000; // 2 minutes
-            const age = Date.now() - ((_b = (_a = ledgerRecord.processingStartedAt) === null || _a === void 0 ? void 0 : _a.getTime()) !== null && _b !== void 0 ? _b : 0);
-            if (age < staleThresholdMs) {
-                // Still fresh — another server is likely handling it. Skip gracefully.
-                return true;
-            }
-            // Stale — reconcile by querying Stripe with the idempotency key
-            // For now: mark as unknown and require reconciliation
-            ledgerRecord.status = 'unknown';
-            yield ledgerRecord.save();
+        const age = Date.now() - ((_b = (_a = ledgerRecord.processingStartedAt) === null || _a === void 0 ? void 0 : _a.getTime()) !== null && _b !== void 0 ? _b : 0);
+        if (age < 2 * 60 * 1000)
             return false;
-        }
-        // Forced settlement on end-of-session: proceed with attempt
-        ledgerRecord.processingStartedAt = new Date();
+        ledgerRecord.status = 'unknown';
         yield ledgerRecord.save();
+        return false;
     }
     // Set to processing before API call
     if (ledgerRecord.status !== 'processing') {
@@ -238,7 +228,7 @@ const attemptMinuteCharge = (consultationId_1, minute_1, consultation_1, ...args
     }
     // Strict check before Stripe API
     const currentSession = yield videoSession_model_1.VideoSession.findOne({ consultation: consultationId });
-    if (!allowEndedSession && (!currentSession || currentSession.status !== 'ongoing')) {
+    if (!currentSession || currentSession.status !== 'ongoing') {
         console.log(`Session ended right before Stripe call for minute ${minute}`);
         return false;
     }
@@ -390,7 +380,8 @@ const stopBilling = (consultationId) => __awaiter(void 0, void 0, void 0, functi
     if (!consultation)
         return;
     if (consultation.billingStatus !== 'active') {
-        consultation.billingStatus = 'completed';
+        if (consultation.billingStatus === 'pending')
+            consultation.billingStatus = 'completed';
         yield consultation.save();
         yield voidPreAuth(consultationId, consultation);
         return;
@@ -403,11 +394,6 @@ const stopBilling = (consultationId) => __awaiter(void 0, void 0, void 0, functi
         yield voidPreAuth(consultationId, consultation);
         return;
     }
-    // Ensure minute 1 is charged if call was connected and min1 is missing or not yet succeeded
-    const min1 = yield payment_model_1.BillingTransaction.findOne({ consultationId, billingMinute: 1, type: 'charge' });
-    if (!min1 || min1.status !== 'succeeded') {
-        yield attemptMinuteCharge(consultationId, 1, consultation, true);
-    }
     const successfulTransactions = yield payment_model_1.BillingTransaction.find({
         consultationId,
         type: 'charge',
@@ -418,7 +404,12 @@ const stopBilling = (consultationId) => __awaiter(void 0, void 0, void 0, functi
     consultation.consumedAmount = ledgerTotal;
     consultation.billingStatus = 'completed';
     consultation.status = 'completed';
-    consultation.paymentStatus = 'paid';
+    const unresolvedCharges = yield payment_model_1.BillingTransaction.find({
+        consultationId, type: 'charge', status: { $in: ['processing', 'unknown', 'failed'] },
+    });
+    if (unresolvedCharges.length === 0 && successfulTransactions.length > 0) {
+        consultation.paymentStatus = 'paid';
+    }
     yield consultation.save();
     yield voidPreAuth(consultationId, consultation);
 });

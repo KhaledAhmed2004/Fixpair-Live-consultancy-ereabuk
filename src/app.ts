@@ -14,14 +14,13 @@ app.use(Morgan.errorHandler);
 //body parser
 app.use(
   cors({
-    //     origin: [
-    //   'http://localhost:3000',
-    //   'http://localhost:3001',
-    //   'http://localhost:3002',
-    //   'https://ereabook-updated-work.vercel.app',
-    //   'https://www.ereabook-updated-work.vercel.app',
-    // ],
-    origin: true,
+    origin: [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3002',
+      'https://ereabook-updated-work.vercel.app',
+      'https://www.ereabook-updated-work.vercel.app',
+    ],
     credentials: true,
   })
 );

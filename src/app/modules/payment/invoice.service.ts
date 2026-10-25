@@ -421,6 +421,11 @@ const finalizeInvoice = async (consultationId: string) => {
     await Consultation.findById(consultationId).populate('user consultant');
   if (!consultation) return;
 
+  // Only settled payments may produce paid invoices.
+  if (consultation.paymentStatus !== 'paid') return;
+  const existingInvoice = await Invoice.findOne({ session: consultationId });
+  if (existingInvoice) return existingInvoice;
+
   const session = await VideoSession.findOne({ consultation: consultationId });
 
   let durationSeconds = 0;

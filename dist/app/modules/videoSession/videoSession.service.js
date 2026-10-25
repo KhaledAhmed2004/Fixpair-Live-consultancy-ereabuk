@@ -44,7 +44,7 @@ const createSession = (user, consultationId) => __awaiter(void 0, void 0, void 0
         consultation.consultant.toString() !== user.id) {
         throw new ApiError_1.default(http_status_codes_1.StatusCodes.FORBIDDEN, 'You are not part of this consultation');
     }
-    const ALLOWED_STATUSES = ['pending', 'confirmed', 'accepted'];
+    const ALLOWED_STATUSES = ['pending', 'confirmed', 'accepted', 'ongoing'];
     if (!ALLOWED_STATUSES.includes(consultation.status)) {
         throw new ApiError_1.default(http_status_codes_1.StatusCodes.BAD_REQUEST, `Cannot create a video session for a consultation with status: ${consultation.status}`);
     }
@@ -58,17 +58,19 @@ const createSession = (user, consultationId) => __awaiter(void 0, void 0, void 0
     });
     if (result) {
         if (result.status === 'ongoing') {
-            return Object.assign(Object.assign({}, result.toObject()), { uid });
+            return Object.assign(Object.assign({}, result.toObject()), { token, uid });
         }
         if (result.status === 'ended' && consultation.status === 'completed') {
             throw new ApiError_1.default(http_status_codes_1.StatusCodes.BAD_REQUEST, 'This consultation session has already ended');
         }
         // Re-use and reset session state for a fresh ringing call
+        const restarting = result.status === 'ended';
         result.status = 'pending';
         result.startedAt = undefined;
         result.endedAt = undefined;
         result.duration = undefined;
-        result.joinedParticipants = [new mongoose_1.default.Types.ObjectId(user.id)];
+        if (restarting)
+            result.joinedParticipants = [];
         result.token = token;
         result.channelName = channelName;
         yield result.save();
@@ -81,7 +83,7 @@ const createSession = (user, consultationId) => __awaiter(void 0, void 0, void 0
             channelName,
             token,
             status: 'pending',
-            joinedParticipants: [new mongoose_1.default.Types.ObjectId(user.id)],
+            joinedParticipants: [],
         };
         result = yield videoSession_model_1.VideoSession.create(sessionData);
     }
@@ -98,7 +100,7 @@ const createSession = (user, consultationId) => __awaiter(void 0, void 0, void 0
     let consultantAvatar = (consultantDetails === null || consultantDetails === void 0 ? void 0 : consultantDetails.image) || (consultantDetails === null || consultantDetails === void 0 ? void 0 : consultantDetails.avatar) || '';
     if (consultantAvatar && !consultantAvatar.startsWith('http')) {
         // Convert relative path to full URL using config
-        const baseUrl = process.env.BASE_URL || config_1.default.ip_address || '';
+        const baseUrl = process.env.BASE_URL || 'https://nayem5000.binarybards.online';
         consultantAvatar = baseUrl
             ? `${baseUrl}${consultantAvatar.startsWith('/') ? '' : '/'}${consultantAvatar}`
             : consultantAvatar;
@@ -109,7 +111,7 @@ const createSession = (user, consultationId) => __awaiter(void 0, void 0, void 0
         (user.role === 'CONSULTANT' ? consultantName : 'Fixpair User');
     let callerAvatar = (callerUser === null || callerUser === void 0 ? void 0 : callerUser.image) || (callerUser === null || callerUser === void 0 ? void 0 : callerUser.avatar) || '';
     if (callerAvatar && !callerAvatar.startsWith('http')) {
-        const baseUrl = process.env.BASE_URL || config_1.default.ip_address || '';
+        const baseUrl = process.env.BASE_URL || 'https://nayem5000.binarybards.online';
         callerAvatar = baseUrl
             ? `${baseUrl}${callerAvatar.startsWith('/') ? '' : '/'}${callerAvatar}`
             : callerAvatar;
@@ -183,7 +185,7 @@ const joinSession = (user, sessionId) => __awaiter(void 0, void 0, void 0, funct
         const consultationDoc = yield consultation_model_1.Consultation.findById(session.consultation);
         const isBillingPending = !consultationDoc || consultationDoc.billingStatus === 'pending';
         const startedSession = isBillingPending
-            ? yield videoSession_model_1.VideoSession.findOneAndUpdate({ _id: actualSessionId, status: { $in: ['pending', 'ongoing'] } }, { status: 'ongoing', startedAt: session.startedAt || new Date() }, { new: true })
+            ? yield videoSession_model_1.VideoSession.findOneAndUpdate({ _id: actualSessionId, status: 'pending' }, { status: 'ongoing', startedAt: session.startedAt || new Date() }, { new: true })
             : null;
         if (startedSession) {
             // 1. Trigger billing only now that both parties are connected
@@ -200,7 +202,10 @@ const joinSession = (user, sessionId) => __awaiter(void 0, void 0, void 0, funct
             transcription_service_1.TranscriptionService.startTranscription(session.consultation.toString())
                 .catch((sttError) => __awaiter(void 0, void 0, void 0, function* () {
                 console.error('STT startup failed:', sttError);
-                yield videoSession_model_1.VideoSession.findByIdAndUpdate(actualSessionId, {
+                const endedSession = yield videoSession_model_1.VideoSession.findOneAndUpdate({
+                    _id: actualSessionId,
+                    status: { $ne: 'ended' },
+                }, {
                     $set: { transcriptionStatus: 'failed' },
                 });
                 socketHelper_1.socketHelper.emitToUser(user.id, 'transcription-failed', {
@@ -244,12 +249,19 @@ const endSession = (user, sessionId) => __awaiter(void 0, void 0, void 0, functi
     const duration = session.startedAt
         ? Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000)
         : 0;
-    yield videoSession_model_1.VideoSession.findByIdAndUpdate(actualSessionId, {
+    const endedSession = yield videoSession_model_1.VideoSession.findOneAndUpdate({
+        _id: actualSessionId,
+        status: { $ne: 'ended' },
+    }, {
         status: 'ended',
         endedAt,
         duration,
         transcriptionStatus: 'stopping',
     });
+    if (!endedSession)
+        return yield videoSession_model_1.VideoSession.findById(actualSessionId);
+    if (!endedSession)
+        return yield videoSession_model_1.VideoSession.findById(actualSessionId);
     // Stop transcription
     try {
         yield transcription_service_1.TranscriptionService.stopTranscription(session.consultation.toString());
@@ -259,8 +271,12 @@ const endSession = (user, sessionId) => __awaiter(void 0, void 0, void 0, functi
     }
     // Stop billing and generate invoice
     yield billing_service_1.BillingService.stopBilling(session.consultation.toString());
-    yield consultation_model_1.Consultation.findByIdAndUpdate(session.consultation, { status: 'completed' });
-    yield invoice_service_1.InvoiceService.finalizeInvoice(session.consultation.toString());
+    yield consultation_model_1.Consultation.findByIdAndUpdate(session.consultation, {
+        status: session.startedAt ? 'completed' : 'cancelled',
+    });
+    if (session.startedAt) {
+        yield invoice_service_1.InvoiceService.finalizeInvoice(session.consultation.toString());
+    }
     const updatedConsultation = yield consultation_model_1.Consultation.findById(session.consultation).populate('user consultant');
     if (updatedConsultation) {
         const client = ((_a = updatedConsultation.user) === null || _a === void 0 ? void 0 : _a.name) || 'Client';
@@ -298,7 +314,7 @@ const endSession = (user, sessionId) => __awaiter(void 0, void 0, void 0, functi
         ? session.consultant.toString()
         : session.user.toString();
     const emitFinalAmount = (updatedConsultation === null || updatedConsultation === void 0 ? void 0 : updatedConsultation.consumedAmount) || 0;
-    const emitBillableMins = duration > 0 ? Math.max(1, Math.ceil(duration / 60)) : 1;
+    const emitBillableMins = session.startedAt ? Math.max(1, Math.ceil(duration / 60)) : 0;
     socketHelper_1.socketHelper.emitToUser(recipientId, 'call-ended', {
         duration,
         billableMinutes: emitBillableMins,
@@ -354,6 +370,13 @@ const handleCallAction = (user, sessionId, action) => __awaiter(void 0, void 0, 
         throw new ApiError_1.default(http_status_codes_1.StatusCodes.NOT_FOUND, 'Session not found');
     }
     const actualSessionId = session._id.toString();
+    if (session.user.toString() !== user.id && session.consultant.toString() !== user.id) {
+        throw new ApiError_1.default(http_status_codes_1.StatusCodes.FORBIDDEN, 'You are not part of this session');
+    }
+    if (session.status === 'ended')
+        return session;
+    if (session.status === 'ongoing')
+        return yield endSession(user, actualSessionId);
     const recipientId = user.id === session.user.toString()
         ? session.consultant.toString()
         : session.user.toString();

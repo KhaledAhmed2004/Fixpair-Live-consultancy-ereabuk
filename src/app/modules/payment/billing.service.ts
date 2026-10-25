@@ -123,7 +123,7 @@ const startBilling = async (consultationId: string) => {
     activeTimers.set(consultationId, timer);
 
     // Initial charge for minute 1 upon connection
-    await attemptMinuteCharge(consultationId, 1, consultation, true);
+    await attemptMinuteCharge(consultationId, 1, consultation);
 
   } finally {
     billingLocks.delete(consultationId);
@@ -173,8 +173,7 @@ const processBillingIntervals = async (consultationId: string) => {
 const attemptMinuteCharge = async (
    consultationId: string, 
    minute: number, 
-   consultation: any,
-   allowEndedSession: boolean = false
+   consultation: any
 ): Promise<boolean> => {
    const chargeAmount = minute === 1 
       ? consultation.platformFee + consultation.perMinuteRate 
@@ -225,22 +224,11 @@ const attemptMinuteCharge = async (
        // Let's retry it.
    }
    if (ledgerRecord.status === 'processing' && !isNew) {
-       if (!allowEndedSession) {
-           const staleThresholdMs = 2 * 60 * 1000; // 2 minutes
-           const age = Date.now() - (ledgerRecord.processingStartedAt?.getTime() ?? 0);
-           if (age < staleThresholdMs) {
-               // Still fresh — another server is likely handling it. Skip gracefully.
-               return true;
-           }
-           // Stale — reconcile by querying Stripe with the idempotency key
-           // For now: mark as unknown and require reconciliation
-           ledgerRecord.status = 'unknown';
-           await ledgerRecord.save();
-           return false;
-       }
-       // Forced settlement on end-of-session: proceed with attempt
-       ledgerRecord.processingStartedAt = new Date();
+       const age = Date.now() - (ledgerRecord.processingStartedAt?.getTime() ?? 0);
+       if (age < 2 * 60 * 1000) return false;
+       ledgerRecord.status = 'unknown';
        await ledgerRecord.save();
+       return false;
    }
 
    // Set to processing before API call
@@ -252,7 +240,7 @@ const attemptMinuteCharge = async (
 
    // Strict check before Stripe API
    const currentSession = await VideoSession.findOne({ consultation: consultationId });
-   if (!allowEndedSession && (!currentSession || currentSession.status !== 'ongoing')) {
+   if (!currentSession || currentSession.status !== 'ongoing') {
        console.log(`Session ended right before Stripe call for minute ${minute}`);
        return false;
    }
@@ -435,7 +423,7 @@ const stopBilling = async (consultationId: string) => {
   if (!consultation) return;
 
   if (consultation.billingStatus !== 'active') {
-    consultation.billingStatus = 'completed';
+    if (consultation.billingStatus === 'pending') consultation.billingStatus = 'completed';
     await consultation.save();
     await voidPreAuth(consultationId, consultation);
     return;
@@ -451,12 +439,6 @@ const stopBilling = async (consultationId: string) => {
     return;
   }
 
-  // Ensure minute 1 is charged if call was connected and min1 is missing or not yet succeeded
-  const min1 = await BillingTransaction.findOne({ consultationId, billingMinute: 1, type: 'charge' });
-  if (!min1 || min1.status !== 'succeeded') {
-    await attemptMinuteCharge(consultationId, 1, consultation, true);
-  }
-
   const successfulTransactions = await BillingTransaction.find({
     consultationId,
     type: 'charge',
@@ -467,7 +449,12 @@ const stopBilling = async (consultationId: string) => {
   consultation.consumedAmount = ledgerTotal;
   consultation.billingStatus = 'completed';
   consultation.status = 'completed';
-  consultation.paymentStatus = 'paid';
+  const unresolvedCharges = await BillingTransaction.find({
+    consultationId, type: 'charge', status: { $in: ['processing', 'unknown', 'failed'] },
+  });
+  if (unresolvedCharges.length === 0 && successfulTransactions.length > 0) {
+    consultation.paymentStatus = 'paid';
+  }
   await consultation.save();
 
   await voidPreAuth(consultationId, consultation);

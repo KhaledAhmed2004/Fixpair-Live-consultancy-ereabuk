@@ -47,7 +47,13 @@ async function main() {
     const io = new Server(server, {
       pingTimeout: 60000,
       cors: {
-        origin: true,
+        origin: [
+          'http://localhost:3000',
+          'http://localhost:3001',
+          'http://localhost:3002',
+          'https://ereabook-updated-work.vercel.app',
+          'https://www.ereabook-updated-work.vercel.app',
+        ],
         credentials: true,
       },
     });

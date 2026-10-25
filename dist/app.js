@@ -16,14 +16,13 @@ app.use(morgen_1.Morgan.successHandler);
 app.use(morgen_1.Morgan.errorHandler);
 //body parser
 app.use((0, cors_1.default)({
-    //     origin: [
-    //   'http://localhost:3000',
-    //   'http://localhost:3001',
-    //   'http://localhost:3002',
-    //   'https://ereabook-updated-work.vercel.app',
-    //   'https://www.ereabook-updated-work.vercel.app',
-    // ],
-    origin: true,
+    origin: [
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'http://localhost:3002',
+        'https://ereabook-updated-work.vercel.app',
+        'https://www.ereabook-updated-work.vercel.app',
+    ],
     credentials: true,
 }));
 app.use((0, cookie_parser_1.default)());

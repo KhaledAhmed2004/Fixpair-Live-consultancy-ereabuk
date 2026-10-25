@@ -42,7 +42,7 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
     );
   }
 
-  const ALLOWED_STATUSES = ['pending', 'confirmed', 'accepted'];
+  const ALLOWED_STATUSES = ['pending', 'confirmed', 'accepted', 'ongoing'];
   if (!ALLOWED_STATUSES.includes(consultation.status)) {
     throw new ApiError(
       StatusCodes.BAD_REQUEST,
@@ -62,7 +62,7 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
 
   if (result) {
     if (result.status === 'ongoing') {
-      return { ...result.toObject(), uid };
+      return { ...result.toObject(), token, uid };
     }
     if (result.status === 'ended' && consultation.status === 'completed') {
       throw new ApiError(
@@ -71,11 +71,12 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
       );
     }
     // Re-use and reset session state for a fresh ringing call
+    const restarting = result.status === 'ended';
     result.status = 'pending';
     result.startedAt = undefined;
     result.endedAt = undefined;
     result.duration = undefined;
-    result.joinedParticipants = [new mongoose.Types.ObjectId(user.id)];
+    if (restarting) result.joinedParticipants = [];
     result.token = token;
     result.channelName = channelName;
     await result.save();
@@ -87,7 +88,7 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
       channelName,
       token,
       status: 'pending',
-      joinedParticipants: [new mongoose.Types.ObjectId(user.id)],
+      joinedParticipants: [],
     };
     result = await VideoSession.create(sessionData);
   }
@@ -108,7 +109,7 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
   let consultantAvatar = consultantDetails?.image || consultantDetails?.avatar || '';
   if (consultantAvatar && !consultantAvatar.startsWith('http')) {
     // Convert relative path to full URL using config
-    const baseUrl = process.env.BASE_URL || config.ip_address || '';
+    const baseUrl = process.env.BASE_URL || 'https://nayem5000.binarybards.online';
     consultantAvatar = baseUrl
       ? `${baseUrl}${consultantAvatar.startsWith('/') ? '' : '/'}${consultantAvatar}`
       : consultantAvatar;
@@ -122,7 +123,7 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
 
   let callerAvatar = callerUser?.image || callerUser?.avatar || '';
   if (callerAvatar && !callerAvatar.startsWith('http')) {
-    const baseUrl = process.env.BASE_URL || config.ip_address || '';
+    const baseUrl = process.env.BASE_URL || 'https://nayem5000.binarybards.online';
     callerAvatar = baseUrl
       ? `${baseUrl}${callerAvatar.startsWith('/') ? '' : '/'}${callerAvatar}`
       : callerAvatar;
@@ -233,7 +234,7 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
 
     const startedSession = isBillingPending
       ? await VideoSession.findOneAndUpdate(
-          { _id: actualSessionId, status: { $in: ['pending', 'ongoing'] } },
+          { _id: actualSessionId, status: 'pending' },
           { status: 'ongoing', startedAt: session.startedAt || new Date() },
           { new: true },
         )
@@ -260,7 +261,10 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
       TranscriptionService.startTranscription(session.consultation.toString())
         .catch(async (sttError) => {
           console.error('STT startup failed:', sttError);
-          await VideoSession.findByIdAndUpdate(actualSessionId, {
+  const endedSession = await VideoSession.findOneAndUpdate({
+    _id: actualSessionId,
+    status: { $ne: 'ended' },
+  }, {
             $set: { transcriptionStatus: 'failed' },
           });
           socketHelper.emitToUser(user.id, 'transcription-failed', {
@@ -327,12 +331,17 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
     ? Math.floor((endedAt.getTime() - session.startedAt.getTime()) / 1000)
     : 0;
 
-  await VideoSession.findByIdAndUpdate(actualSessionId, {
+  const endedSession = await VideoSession.findOneAndUpdate({
+    _id: actualSessionId,
+    status: { $ne: 'ended' },
+  }, {
     status: 'ended',
     endedAt,
     duration,
     transcriptionStatus: 'stopping',
   });
+  if (!endedSession) return await VideoSession.findById(actualSessionId);
+  if (!endedSession) return await VideoSession.findById(actualSessionId);
 
   // Stop transcription
   try {
@@ -343,8 +352,12 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
 
   // Stop billing and generate invoice
   await BillingService.stopBilling(session.consultation.toString());
-  await Consultation.findByIdAndUpdate(session.consultation, { status: 'completed' });
-  await InvoiceService.finalizeInvoice(session.consultation.toString());
+  await Consultation.findByIdAndUpdate(session.consultation, {
+    status: session.startedAt ? 'completed' : 'cancelled',
+  });
+  if (session.startedAt) {
+    await InvoiceService.finalizeInvoice(session.consultation.toString());
+  }
 
   const updatedConsultation = await Consultation.findById(session.consultation).populate('user consultant');
   
@@ -394,7 +407,7 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
       : session.user.toString();
 
   const emitFinalAmount = updatedConsultation?.consumedAmount || 0;
-  const emitBillableMins = duration > 0 ? Math.max(1, Math.ceil(duration / 60)) : 1;
+  const emitBillableMins = session.startedAt ? Math.max(1, Math.ceil(duration / 60)) : 0;
 
   socketHelper.emitToUser(recipientId, 'call-ended', {
     duration,
@@ -468,6 +481,11 @@ const handleCallAction = async (
   }
 
   const actualSessionId = session._id.toString();
+  if (session.user.toString() !== user.id && session.consultant.toString() !== user.id) {
+    throw new ApiError(StatusCodes.FORBIDDEN, 'You are not part of this session');
+  }
+  if (session.status === 'ended') return session;
+  if (session.status === 'ongoing') return await endSession(user, actualSessionId);
 
   const recipientId =
     user.id === session.user.toString()

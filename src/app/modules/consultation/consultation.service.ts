@@ -402,7 +402,7 @@ const createBooking = async (
       if (busy.status === 'ongoing') {
         const activeSession = await VideoSession.findOne({
           consultation: busy._id,
-          status: 'ongoing',
+          status: { $in: ['pending', 'ongoing'] },
         });
         if (!activeSession) {
           // Stale ongoing consultation whose video session ended — auto-complete it

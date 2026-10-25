@@ -295,7 +295,7 @@ const createBooking = (user, payload) => __awaiter(void 0, void 0, void 0, funct
             if (busy.status === 'ongoing') {
                 const activeSession = yield videoSession_model_1.VideoSession.findOne({
                     consultation: busy._id,
-                    status: 'ongoing',
+                    status: { $in: ['pending', 'ongoing'] },
                 });
                 if (!activeSession) {
                     // Stale ongoing consultation whose video session ended — auto-complete it

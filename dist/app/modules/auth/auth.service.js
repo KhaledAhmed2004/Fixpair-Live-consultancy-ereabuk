@@ -91,13 +91,13 @@ const socialLoginFromDB = (payload) => __awaiter(void 0, void 0, void 0, functio
         const decodedToken = yield firebase_admin_1.default.auth().verifyIdToken(idToken);
         // Extracted user details from Firebase token
         const firebaseUid = decodedToken.uid;
-        let email = payload.email || decodedToken.email;
+        let email = decodedToken.email_verified ? decodedToken.email : undefined;
         let name = payload.name || decodedToken.name;
         // If email is missing (standard with Apple Sign In), attempt to fetch from Firebase UserRecord
         if (!email) {
             try {
                 const userRecord = yield firebase_admin_1.default.auth().getUser(firebaseUid);
-                if (userRecord && userRecord.email) {
+                if (userRecord && userRecord.email && userRecord.emailVerified) {
                     email = userRecord.email;
                 }
                 if (!name && userRecord && userRecord.displayName) {
@@ -160,8 +160,8 @@ const socialLoginFromDB = (payload) => __awaiter(void 0, void 0, void 0, functio
                 isUpdated = true;
             }
             // If user had a generated placeholder email and a real email was provided
-            if (payload.email && user.email.startsWith('apple_')) {
-                user.email = payload.email.toLowerCase();
+            if (email && user.email.startsWith('apple_')) {
+                user.email = email.toLowerCase();
                 isUpdated = true;
             }
             if (isUpdated) {

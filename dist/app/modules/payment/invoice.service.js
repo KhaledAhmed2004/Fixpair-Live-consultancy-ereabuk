@@ -329,6 +329,12 @@ const finalizeInvoice = (consultationId) => __awaiter(void 0, void 0, void 0, fu
     const consultation = yield consultation_model_1.Consultation.findById(consultationId).populate('user consultant');
     if (!consultation)
         return;
+    // Only settled payments may produce paid invoices.
+    if (consultation.paymentStatus !== 'paid')
+        return;
+    const existingInvoice = yield payment_model_1.Invoice.findOne({ session: consultationId });
+    if (existingInvoice)
+        return existingInvoice;
     const session = yield videoSession_model_1.VideoSession.findOne({ consultation: consultationId });
     let durationSeconds = 0;
     if ((session === null || session === void 0 ? void 0 : session.duration) != null && session.duration > 0) {
