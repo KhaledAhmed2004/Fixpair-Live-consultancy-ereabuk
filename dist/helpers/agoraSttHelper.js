@@ -55,7 +55,7 @@ const startTranscription = (channelName, botToken) => __awaiter(void 0, void 0, 
         logger_1.logger.info(`Agora STT agent starting | appId=${appId} channel=${channelName} botToken=${tokenStatus} subscribeUids=1001,2001`);
         const response = yield axios_1.default.post(`${AGORA_STT_BASE_URL}/${appId}/join`, {
             name: `stt-${channelName}`,
-            languages: ['en-US'],
+            languages: ['de-DE', 'en-US'],
             maxIdleTime: 50,
             rtcConfig: {
                 channelName,
