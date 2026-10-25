@@ -226,7 +226,7 @@ const generateInvoicePDF = (invoiceData) => __awaiter(void 0, void 0, void 0, fu
     });
 });
 const getInvoiceDataFromDB = (user, consultationId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     const consultation = yield consultation_model_1.Consultation.findById(consultationId).populate('user consultant');
     if (!consultation) {
         throw new ApiError_1.default(http_status_codes_1.StatusCodes.NOT_FOUND, 'Consultation not found');
@@ -260,24 +260,35 @@ const getInvoiceDataFromDB = (user, consultationId) => __awaiter(void 0, void 0,
                 paymentMethod = 'Credit/Debit Card';
         }
     }
-    const actualConsumed = Math.max(0, consultation.consumedAmount - consultation.platformFee);
-    const durationInSeconds = consultation.perMinuteRate > 0
-        ? (actualConsumed / consultation.perMinuteRate) * 60
-        : 0;
-    const billableMinutes = consultation.perMinuteRate > 0
-        ? Math.ceil(actualConsumed / consultation.perMinuteRate)
-        : 0;
+    const session = yield videoSession_model_1.VideoSession.findOne({ consultation: consultationId });
+    let durationInSeconds = 0;
+    if ((session === null || session === void 0 ? void 0 : session.duration) != null && session.duration > 0) {
+        durationInSeconds = session.duration;
+    }
+    else if ((session === null || session === void 0 ? void 0 : session.startedAt) && (session === null || session === void 0 ? void 0 : session.endedAt)) {
+        durationInSeconds = Math.floor((session.endedAt.getTime() - session.startedAt.getTime()) / 1000);
+    }
+    else if (session === null || session === void 0 ? void 0 : session.startedAt) {
+        durationInSeconds = Math.floor((Date.now() - session.startedAt.getTime()) / 1000);
+    }
+    const duration = Math.floor(durationInSeconds / 60);
+    const billableMinutes = (session === null || session === void 0 ? void 0 : session.startedAt)
+        ? Math.max(1, Math.ceil(durationInSeconds / 60))
+        : (consultation.perMinuteRate > 0 ? Math.ceil(consultation.consumedAmount / consultation.perMinuteRate) : 0);
+    const totalAmount = consultation.consumedAmount || consultation.finalSettledAmount || 0;
+    const platformFee = (_b = consultation.platformFee) !== null && _b !== void 0 ? _b : 0;
+    const subtotal = Math.max(0, totalAmount - platformFee);
     const invoiceData = {
         consultationId: consultation._id,
         invoiceNumber: `INV-${consultation._id.toString().slice(-6).toUpperCase()}-${Date.now().toString().slice(-4)}`,
         date: consultation.date || consultation.createdAt,
         invoiceDate: new Date(),
-        duration: Math.floor(durationInSeconds / 60),
+        duration,
         billableMinutes,
         perMinuteRate: consultation.perMinuteRate,
-        subtotal: consultation.consumedAmount - consultation.platformFee,
-        platformFee: consultation.platformFee,
-        totalAmount: consultation.consumedAmount,
+        subtotal,
+        platformFee,
+        totalAmount,
         status: consultation.paymentStatus,
         paymentMethod,
         transactionId: (transaction === null || transaction === void 0 ? void 0 : transaction.transactionId) || null,
@@ -314,32 +325,36 @@ const generateAndGetInvoicePDF = (user, consultationId) => __awaiter(void 0, voi
     return pdfUrl;
 });
 const finalizeInvoice = (consultationId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b;
     const consultation = yield consultation_model_1.Consultation.findById(consultationId).populate('user consultant');
     if (!consultation)
         return;
     const session = yield videoSession_model_1.VideoSession.findOne({ consultation: consultationId });
-    let duration = 0;
-    if ((session === null || session === void 0 ? void 0 : session.startedAt) && (session === null || session === void 0 ? void 0 : session.endedAt)) {
-        duration = Math.ceil((session.endedAt.getTime() - session.startedAt.getTime()) / 60000);
+    let durationSeconds = 0;
+    if ((session === null || session === void 0 ? void 0 : session.duration) != null && session.duration > 0) {
+        durationSeconds = session.duration;
+    }
+    else if ((session === null || session === void 0 ? void 0 : session.startedAt) && (session === null || session === void 0 ? void 0 : session.endedAt)) {
+        durationSeconds = Math.floor((session.endedAt.getTime() - session.startedAt.getTime()) / 1000);
     }
     else if (session === null || session === void 0 ? void 0 : session.startedAt) {
-        console.warn(`[INVOICE] Missing endedAt for consultation ${consultationId}, using Date.now()`);
-        duration = Math.ceil((Date.now() - session.startedAt.getTime()) / 60000);
+        durationSeconds = Math.floor((Date.now() - session.startedAt.getTime()) / 1000);
     }
-    else {
-        console.warn(`[INVOICE] Missing startedAt for consultation ${consultationId}, deriving from consumedAmount`);
-        const actualConsumed = Math.max(0, consultation.consumedAmount - consultation.platformFee);
-        duration = consultation.perMinuteRate > 0
-            ? Math.ceil(actualConsumed / consultation.perMinuteRate)
-            : 0;
-    }
+    const billableMinutes = durationSeconds > 0
+        ? Math.max(1, Math.ceil(durationSeconds / 60))
+        : 1;
+    const duration = Math.floor(durationSeconds / 60);
     const allTransactions = yield payment_model_1.Transaction.find({
         consultation: consultationId,
         status: 'captured',
     });
-    const finalSettledAmount = allTransactions.reduce((sum, t) => sum + t.amount, 0);
-    const subtotal = finalSettledAmount - consultation.platformFee;
+    let finalSettledAmount = allTransactions.reduce((sum, t) => sum + t.amount, 0);
+    if (finalSettledAmount === 0) {
+        finalSettledAmount = consultation.finalSettledAmount || consultation.consumedAmount || 0;
+    }
+    const platformFee = (_a = consultation.platformFee) !== null && _a !== void 0 ? _a : 0;
+    const subtotal = Math.max(0, finalSettledAmount - platformFee);
+    const totalAmount = finalSettledAmount;
     // Find associated transaction to get provider
     const transaction = yield payment_model_1.Transaction.findOne({
         consultation: consultationId,
@@ -351,7 +366,7 @@ const finalizeInvoice = (consultationId) => __awaiter(void 0, void 0, void 0, fu
             paymentMethod = 'PayPal';
         }
         else if (transaction.provider === 'stripe') {
-            paymentMethod = ((_a = transaction.metadata) === null || _a === void 0 ? void 0 : _a.payment_type) || 'Card';
+            paymentMethod = ((_b = transaction.metadata) === null || _b === void 0 ? void 0 : _b.payment_type) || 'Card';
             if (paymentMethod === 'card')
                 paymentMethod = 'Credit/Debit Card';
         }
@@ -362,10 +377,11 @@ const finalizeInvoice = (consultationId) => __awaiter(void 0, void 0, void 0, fu
         consultant: consultation.consultant._id,
         invoiceNumber: `INV-${Date.now()}`,
         duration,
+        billableMinutes,
         perMinuteRate: consultation.perMinuteRate,
-        platformFee: consultation.platformFee,
+        platformFee,
         subtotal,
-        totalAmount: consultation.consumedAmount,
+        totalAmount,
         paymentMethod,
         status: 'paid',
     };

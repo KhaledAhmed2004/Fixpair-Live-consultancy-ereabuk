@@ -330,30 +330,38 @@ const getInvoiceDataFromDB = async (
     }
   }
 
-  const actualConsumed = Math.max(
-    0,
-    consultation.consumedAmount - consultation.platformFee,
-  );
-  const durationInSeconds =
-    consultation.perMinuteRate > 0
-      ? (actualConsumed / consultation.perMinuteRate) * 60
-      : 0;
-  const billableMinutes =
-    consultation.perMinuteRate > 0
-      ? Math.ceil(actualConsumed / consultation.perMinuteRate)
-      : 0;
+  const session = await VideoSession.findOne({ consultation: consultationId });
+  let durationInSeconds = 0;
+  if (session?.duration != null && session.duration > 0) {
+    durationInSeconds = session.duration;
+  } else if (session?.startedAt && session?.endedAt) {
+    durationInSeconds = Math.floor(
+      (session.endedAt.getTime() - session.startedAt.getTime()) / 1000,
+    );
+  } else if (session?.startedAt) {
+    durationInSeconds = Math.floor((Date.now() - session.startedAt.getTime()) / 1000);
+  }
+
+  const duration = Math.floor(durationInSeconds / 60);
+  const billableMinutes = session?.startedAt
+    ? Math.max(1, Math.ceil(durationInSeconds / 60))
+    : (consultation.perMinuteRate > 0 ? Math.ceil(consultation.consumedAmount / consultation.perMinuteRate) : 0);
+
+  const totalAmount = consultation.consumedAmount || consultation.finalSettledAmount || 0;
+  const platformFee = consultation.platformFee ?? 0;
+  const subtotal = Math.max(0, totalAmount - platformFee);
 
   const invoiceData = {
     consultationId: consultation._id,
     invoiceNumber: `INV-${consultation._id.toString().slice(-6).toUpperCase()}-${Date.now().toString().slice(-4)}`,
     date: consultation.date || (consultation as any).createdAt,
     invoiceDate: new Date(),
-    duration: Math.floor(durationInSeconds / 60),
+    duration,
     billableMinutes,
     perMinuteRate: consultation.perMinuteRate,
-    subtotal: consultation.consumedAmount - consultation.platformFee,
-    platformFee: consultation.platformFee,
-    totalAmount: consultation.consumedAmount,
+    subtotal,
+    platformFee,
+    totalAmount,
     status: consultation.paymentStatus,
     paymentMethod,
     transactionId: transaction?.transactionId || null,
@@ -415,29 +423,35 @@ const finalizeInvoice = async (consultationId: string) => {
 
   const session = await VideoSession.findOne({ consultation: consultationId });
 
-  let duration = 0;
-  if (session?.startedAt && session?.endedAt) {
-    duration = Math.ceil(
-      (session.endedAt.getTime() - session.startedAt.getTime()) / 60000,
+  let durationSeconds = 0;
+  if (session?.duration != null && session.duration > 0) {
+    durationSeconds = session.duration;
+  } else if (session?.startedAt && session?.endedAt) {
+    durationSeconds = Math.floor(
+      (session.endedAt.getTime() - session.startedAt.getTime()) / 1000,
     );
   } else if (session?.startedAt) {
-    console.warn(`[INVOICE] Missing endedAt for consultation ${consultationId}, using Date.now()`);
-    duration = Math.ceil((Date.now() - session.startedAt.getTime()) / 60000);
-  } else {
-    console.warn(`[INVOICE] Missing startedAt for consultation ${consultationId}, deriving from consumedAmount`);
-    const actualConsumed = Math.max(0, consultation.consumedAmount - consultation.platformFee);
-    duration = consultation.perMinuteRate > 0
-      ? Math.ceil(actualConsumed / consultation.perMinuteRate)
-      : 0;
+    durationSeconds = Math.floor((Date.now() - session.startedAt.getTime()) / 1000);
   }
+
+  const billableMinutes = durationSeconds > 0
+    ? Math.max(1, Math.ceil(durationSeconds / 60))
+    : 1;
+
+  const duration = Math.floor(durationSeconds / 60);
 
   const allTransactions = await Transaction.find({
     consultation: consultationId,
     status: 'captured',
   });
-  const finalSettledAmount = allTransactions.reduce((sum, t) => sum + t.amount, 0);
+  let finalSettledAmount = allTransactions.reduce((sum, t) => sum + t.amount, 0);
+  if (finalSettledAmount === 0) {
+    finalSettledAmount = consultation.finalSettledAmount || consultation.consumedAmount || 0;
+  }
 
-  const subtotal = finalSettledAmount - consultation.platformFee;
+  const platformFee = consultation.platformFee ?? 0;
+  const subtotal = Math.max(0, finalSettledAmount - platformFee);
+  const totalAmount = finalSettledAmount;
 
   // Find associated transaction to get provider
   const transaction = await Transaction.findOne({
@@ -461,10 +475,11 @@ const finalizeInvoice = async (consultationId: string) => {
     consultant: (consultation.consultant as any)._id,
     invoiceNumber: `INV-${Date.now()}`,
     duration,
+    billableMinutes,
     perMinuteRate: consultation.perMinuteRate,
-    platformFee: consultation.platformFee,
+    platformFee,
     subtotal,
-    totalAmount: consultation.consumedAmount,
+    totalAmount,
     paymentMethod,
     status: 'paid' as const,
   };

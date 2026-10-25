@@ -385,7 +385,7 @@ const createBooking = async (
     }
 
     // Check if consultant is busy with anyone else
-    const busyConsultant = await Consultation.findOne({
+    const busyConsultations = await Consultation.find({
       consultant: new mongoose.Types.ObjectId(consultantId),
       user: { $ne: new mongoose.Types.ObjectId(userId) },
       $or: [
@@ -398,7 +398,18 @@ const createBooking = async (
       ],
     });
 
-    if (busyConsultant) {
+    for (const busy of busyConsultations) {
+      if (busy.status === 'ongoing') {
+        const activeSession = await VideoSession.findOne({
+          consultation: busy._id,
+          status: 'ongoing',
+        });
+        if (!activeSession) {
+          // Stale ongoing consultation whose video session ended — auto-complete it
+          await Consultation.findByIdAndUpdate(busy._id, { status: 'completed' });
+          continue;
+        }
+      }
       throw new ApiError(
         StatusCodes.CONFLICT,
         'Consultant is currently busy on another call',
@@ -760,13 +771,6 @@ const updateBookingStatus = async (
     },
   ).populate('consultant');
 
-  // If instant booking is accepted, also transition any pending video session
-  if (status === 'accepted' && booking.bookingType === 'instant') {
-    await VideoSession.findOneAndUpdate(
-      { consultation: resolvedBookingId, status: 'pending' },
-      { status: 'ongoing', startedAt: new Date() },
-    );
-  }
 
   // If booking is rejected or cancelled, end any pending video session and notify client immediately
   if ((status === 'rejected' || status === 'cancelled') && result && result.user) {

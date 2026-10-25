@@ -122,8 +122,8 @@ const startBilling = async (consultationId: string) => {
 
     activeTimers.set(consultationId, timer);
 
-    // Initial charge for minute 1
-    await processBillingIntervals(consultationId);
+    // Initial charge for minute 1 upon connection
+    await attemptMinuteCharge(consultationId, 1, consultation, true);
 
   } finally {
     billingLocks.delete(consultationId);
@@ -170,7 +170,12 @@ const processBillingIntervals = async (consultationId: string) => {
    }
 };
 
-const attemptMinuteCharge = async (consultationId: string, minute: number, consultation: any): Promise<boolean> => {
+const attemptMinuteCharge = async (
+   consultationId: string, 
+   minute: number, 
+   consultation: any,
+   allowEndedSession: boolean = false
+): Promise<boolean> => {
    const chargeAmount = minute === 1 
       ? consultation.platformFee + consultation.perMinuteRate 
       : consultation.perMinuteRate;
@@ -220,17 +225,22 @@ const attemptMinuteCharge = async (consultationId: string, minute: number, consu
        // Let's retry it.
    }
    if (ledgerRecord.status === 'processing' && !isNew) {
-       const staleThresholdMs = 2 * 60 * 1000; // 2 minutes
-       const age = Date.now() - (ledgerRecord.processingStartedAt?.getTime() ?? 0);
-       if (age < staleThresholdMs) {
-           // Still fresh — another server is likely handling it. Skip gracefully.
-           return true;
+       if (!allowEndedSession) {
+           const staleThresholdMs = 2 * 60 * 1000; // 2 minutes
+           const age = Date.now() - (ledgerRecord.processingStartedAt?.getTime() ?? 0);
+           if (age < staleThresholdMs) {
+               // Still fresh — another server is likely handling it. Skip gracefully.
+               return true;
+           }
+           // Stale — reconcile by querying Stripe with the idempotency key
+           // For now: mark as unknown and require reconciliation
+           ledgerRecord.status = 'unknown';
+           await ledgerRecord.save();
+           return false;
        }
-       // Stale — reconcile by querying Stripe with the idempotency key
-       // For now: mark as unknown and require reconciliation
-       ledgerRecord.status = 'unknown';
+       // Forced settlement on end-of-session: proceed with attempt
+       ledgerRecord.processingStartedAt = new Date();
        await ledgerRecord.save();
-       return false;
    }
 
    // Set to processing before API call
@@ -242,14 +252,15 @@ const attemptMinuteCharge = async (consultationId: string, minute: number, consu
 
    // Strict check before Stripe API
    const currentSession = await VideoSession.findOne({ consultation: consultationId });
-   if (!currentSession || currentSession.status !== 'ongoing') {
+   if (!allowEndedSession && (!currentSession || currentSession.status !== 'ongoing')) {
        console.log(`Session ended right before Stripe call for minute ${minute}`);
        return false;
    }
 
    // Execute Stripe Call
    try {
-       const user = await User.findById(consultation.user._id);
+       const userId = (consultation.user as any)?._id || consultation.user;
+       const user = await User.findById(userId);
        const defaultMethod = user?.paymentMethods?.find((m: any) => m.isDefault) || user?.paymentMethods?.[0];
        
        console.log("[DEBUG] User:", user?._id, "methodId:", defaultMethod?.methodId);
@@ -304,7 +315,7 @@ const attemptMinuteCharge = async (consultationId: string, minute: number, consu
        await NotificationService.sendNotification({
          user: consultation.user._id.toString(),
          title: 'Payment Successful',
-         message: `Your payment of $${(chargeAmount/100).toFixed(2)} has been completed successfully.`,
+         message: `Your payment of $${chargeAmount.toFixed(2)} has been completed successfully.`,
          type: 'PAYMENT_SUCCESS',
          relatedBooking: consultationId,
          idempotencyKey: `payment_success_${transaction.transactionId}`,
@@ -419,21 +430,47 @@ const stopTimerOnly = (consultationId: string) => {
 
 const stopBilling = async (consultationId: string) => {
   stopTimerOnly(consultationId);
-  const consultation = await Consultation.findById(consultationId);
-  if (consultation) {
-    const successfulTransactions = await BillingTransaction.find({
-      consultationId,
-      type: 'charge',
-      status: 'succeeded',
-    });
-    const ledgerTotal = successfulTransactions.reduce((sum, t) => sum + t.amount, 0);
-    consultation.finalSettledAmount = ledgerTotal;
-    consultation.consumedAmount = ledgerTotal;
-    
+
+  const consultation = await Consultation.findById(consultationId).populate('user consultant');
+  if (!consultation) return;
+
+  if (consultation.billingStatus !== 'active') {
     consultation.billingStatus = 'completed';
     await consultation.save();
     await voidPreAuth(consultationId, consultation);
+    return;
   }
+
+  const session = await VideoSession.findOne({ consultation: consultationId });
+
+  // If call was cancelled before starting or never connected, skip
+  if (consultation.status === 'cancelled' || !session?.startedAt) {
+    consultation.billingStatus = 'completed';
+    await consultation.save();
+    await voidPreAuth(consultationId, consultation);
+    return;
+  }
+
+  // Ensure minute 1 is charged if call was connected and min1 is missing or not yet succeeded
+  const min1 = await BillingTransaction.findOne({ consultationId, billingMinute: 1, type: 'charge' });
+  if (!min1 || min1.status !== 'succeeded') {
+    await attemptMinuteCharge(consultationId, 1, consultation, true);
+  }
+
+  const successfulTransactions = await BillingTransaction.find({
+    consultationId,
+    type: 'charge',
+    status: 'succeeded',
+  });
+  const ledgerTotal = successfulTransactions.reduce((sum, t) => sum + t.amount, 0);
+  consultation.finalSettledAmount = ledgerTotal;
+  consultation.consumedAmount = ledgerTotal;
+  consultation.billingStatus = 'completed';
+  consultation.status = 'completed';
+  consultation.paymentStatus = 'paid';
+  await consultation.save();
+
+  await voidPreAuth(consultationId, consultation);
 };
 
 const recoverBilling = async () => {

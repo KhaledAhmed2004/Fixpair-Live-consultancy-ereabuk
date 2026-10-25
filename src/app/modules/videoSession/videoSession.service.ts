@@ -75,7 +75,7 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
     result.startedAt = undefined;
     result.endedAt = undefined;
     result.duration = undefined;
-    result.joinedParticipants = [];
+    result.joinedParticipants = [new mongoose.Types.ObjectId(user.id)];
     result.token = token;
     result.channelName = channelName;
     await result.save();
@@ -87,7 +87,7 @@ const createSession = async (user: JwtPayload, consultationId: string) => {
       channelName,
       token,
       status: 'pending',
-      joinedParticipants: [],
+      joinedParticipants: [new mongoose.Types.ObjectId(user.id)],
     };
     result = await VideoSession.create(sessionData);
   }
@@ -227,12 +227,17 @@ const joinSession = async (user: JwtPayload, sessionId: string) => {
   const bothParticipantsJoined = hasUserJoined && hasConsultantJoined;
 
   // Only transition to 'ongoing' and start billing when BOTH parties have joined the session
-  if (session.status === 'pending' && bothParticipantsJoined) {
-    const startedSession = await VideoSession.findOneAndUpdate(
-      { _id: actualSessionId, status: 'pending' },
-      { status: 'ongoing', startedAt: new Date() },
-      { new: true },
-    );
+  if (bothParticipantsJoined) {
+    const consultationDoc = await Consultation.findById(session.consultation);
+    const isBillingPending = !consultationDoc || consultationDoc.billingStatus === 'pending';
+
+    const startedSession = isBillingPending
+      ? await VideoSession.findOneAndUpdate(
+          { _id: actualSessionId, status: { $in: ['pending', 'ongoing'] } },
+          { status: 'ongoing', startedAt: session.startedAt || new Date() },
+          { new: true },
+        )
+      : null;
 
     if (startedSession) {
       // 1. Trigger billing only now that both parties are connected
@@ -338,6 +343,7 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
 
   // Stop billing and generate invoice
   await BillingService.stopBilling(session.consultation.toString());
+  await Consultation.findByIdAndUpdate(session.consultation, { status: 'completed' });
   await InvoiceService.finalizeInvoice(session.consultation.toString());
 
   const updatedConsultation = await Consultation.findById(session.consultation).populate('user consultant');
@@ -387,7 +393,14 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
       ? session.consultant.toString()
       : session.user.toString();
 
+  const emitFinalAmount = updatedConsultation?.consumedAmount || 0;
+  const emitBillableMins = duration > 0 ? Math.max(1, Math.ceil(duration / 60)) : 1;
+
   socketHelper.emitToUser(recipientId, 'call-ended', {
+    duration,
+    billableMinutes: emitBillableMins,
+    totalAmount: emitFinalAmount,
+    consumedAmount: emitFinalAmount,
     sessionId: actualSessionId,
     consultationId: session.consultation.toString(),
     bookingId: session.consultation.toString(),
@@ -398,6 +411,10 @@ const endSession = async (user: JwtPayload, sessionId: string) => {
     `consultation:${session.consultation}`,
     'call-ended',
     {
+      duration,
+      billableMinutes: emitBillableMins,
+      totalAmount: emitFinalAmount,
+      consumedAmount: emitFinalAmount,
       sessionId: actualSessionId,
       consultationId: session.consultation.toString(),
       bookingId: session.consultation.toString(),
