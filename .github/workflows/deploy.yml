@@ -43,6 +43,31 @@ jobs:
           script: |
             export PATH=$PATH:/usr/bin:/usr/local/bin
             set -e
+
+            echo "--> Checking and auto-installing server prerequisites..."
+            # 1. Setup Swap memory if not present
+            if [ ! -f /swapfile ]; then
+              echo "--> Creating 2GB swap memory..."
+              sudo fallocate -l 2G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+              sudo chmod 600 /swapfile
+              sudo mkswap /swapfile
+              sudo swapon /swapfile
+              echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab || true
+            fi
+
+            # 2. Install Node.js 20 and npm if missing
+            if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+              echo "--> Node.js/npm not found. Installing Node.js 20 LTS..."
+              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+              sudo apt-get install -y nodejs
+            fi
+
+            # 3. Install PM2 if missing
+            if ! command -v pm2 >/dev/null 2>&1; then
+              echo "--> Installing PM2 globally..."
+              sudo npm install -g pm2
+            fi
+
             TARGET_DIR="/var/www/fixpair-backend"
 
             echo "--> Ensuring deployment directory exists..."
