@@ -23,7 +23,7 @@ let server: any;
 async function main() {
   try {
     await mongoose.connect(config.database_url as string);
-    logger.info(colors.green('🚀 Database connected successfully!'));
+    logger.info(colors.green('🚀 Database connected successfully'));
 
     //Seed Super Admin after database connection is successful
     await seedSuperAdmin();
