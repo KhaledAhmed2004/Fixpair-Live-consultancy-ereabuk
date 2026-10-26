@@ -68,6 +68,83 @@ jobs:
               sudo npm install -g pm2
             fi
 
+            # 4. Install Nginx and Certbot if missing
+            if ! command -v nginx >/dev/null 2>&1 || ! command -v certbot >/dev/null 2>&1; then
+              echo "--> Installing Nginx and Certbot..."
+              sudo apt-get update
+              sudo apt-get install -y nginx certbot python3-certbot-nginx
+            fi
+
+            # 5. Configure Nginx Reverse Proxy for both domains
+            if [ ! -f /etc/nginx/sites-available/fixpair ]; then
+              echo "--> Configuring Nginx for api.getfixpair.com (Port 5000) and dashboard.getfixpair.com (Port 3000)..."
+              sudo bash -c 'cat > /etc/nginx/sites-available/fixpair' << "EOF_NGINX"
+server {
+    listen 80;
+    server_name api.getfixpair.com;
+
+    client_max_body_size 50M;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /socket.io/ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "Upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+
+server {
+    listen 80;
+    server_name dashboard.getfixpair.com;
+
+    client_max_body_size 50M;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /_next/static {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+EOF_NGINX
+
+              sudo ln -sf /etc/nginx/sites-available/fixpair /etc/nginx/sites-enabled/
+              sudo rm -f /etc/nginx/sites-enabled/default
+              sudo nginx -t
+              sudo systemctl restart nginx
+            fi
+
+            # 6. Auto-issue SSL (HTTPS) via Certbot
+            if [ ! -d /etc/letsencrypt/live/api.getfixpair.com ] && [ ! -d /etc/letsencrypt/live/dashboard.getfixpair.com ]; then
+              echo "--> Setting up free SSL certificates for api.getfixpair.com and dashboard.getfixpair.com..."
+              sudo certbot --nginx -d api.getfixpair.com -d dashboard.getfixpair.com --non-interactive --agree-tos --register-unsafely-without-email --redirect || true
+            fi
+
             TARGET_DIR="/var/www/fixpair-backend"
 
             echo "--> Ensuring deployment directory exists..."
