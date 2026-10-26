@@ -1,0 +1,92 @@
+name: Deploy Fixpair Backend to AWS EC2
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-validate:
+    name: Build & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Compile TypeScript
+        run: npm run build
+
+  deploy:
+    name: Deploy to EC2
+    needs: build-and-validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          ENV_CONTENT: ${{ secrets.ENV_FILE }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          envs: ENV_CONTENT
+          script: |
+            export PATH=$PATH:/usr/bin:/usr/local/bin
+            set -e
+            TARGET_DIR="/var/www/fixpair-backend"
+
+            echo "--> Ensuring deployment directory exists..."
+            if [ ! -d "$TARGET_DIR/.git" ]; then
+              echo "Directory $TARGET_DIR does not exist. Initializing clone..."
+              sudo mkdir -p "$TARGET_DIR"
+              sudo chown -R ubuntu:ubuntu "$TARGET_DIR"
+              git clone https://github.com/KhaledAhmed2004/Fixpair-Live-consultancy-ereabuk.git "$TARGET_DIR"
+            fi
+
+            cd "$TARGET_DIR"
+
+            echo "--> Fetching and resetting to origin/main..."
+            git fetch --all
+            git reset --hard origin/main
+
+            # Write .env safely if provided in GitHub Secrets
+            if [ -n "$ENV_CONTENT" ]; then
+              echo "--> Writing .env from GitHub Secret ENV_FILE..."
+              printf '%s\n' "$ENV_CONTENT" > .env
+            elif [ ! -f .env ]; then
+              if [ -f .env.example ]; then
+                echo "--> .env not found. Creating default template from .env.example..."
+                cp .env.example .env
+              fi
+            fi
+
+            # Ensure upload directories exist
+            mkdir -p uploads public
+
+            echo "--> Installing dependencies..."
+            npm install
+
+            echo "--> Compiling TypeScript..."
+            npm run build
+
+            echo "--> Managing PM2 Process..."
+            if pm2 describe fixpair-backend > /dev/null 2>&1; then
+              echo "Reloading existing PM2 process..."
+              pm2 reload ecosystem.config.js
+            else
+              echo "Starting PM2 process for the first time..."
+              pm2 start ecosystem.config.js
+            fi
+            pm2 save
+
+            echo "--> Deployment finished successfully!"
