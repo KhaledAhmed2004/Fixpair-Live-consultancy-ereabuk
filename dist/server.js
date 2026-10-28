@@ -35,9 +35,30 @@ process_1.default.on('uncaughtException', error => {
 let server;
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
+        const port = typeof config_1.default.port === 'number'
+            ? config_1.default.port
+            : Number(config_1.default.port) || 5000;
+        const ip = config_1.default.ip_address || '0.0.0.0';
+        // 1. Immediately start HTTP Server so port 5000 is open,
+        // health checks pass, Nginx proxy functions, and CORS preflights are handled.
+        server = app_1.default.listen(port, ip, () => {
+            logger_1.logger.info(colors_1.default.yellow(`♻️  Application listening on port:${port} (host: ${ip})`));
+        });
+        // 2. Initialize Socket.IO
+        const io = new socket_io_1.Server(server, {
+            pingTimeout: 60000,
+            cors: cors_1.corsOptions,
+        });
+        socketHelper_1.socketHelper.socket(io);
+        //@ts-ignore
+        global.io = io;
+        // 3. Connect to Database asynchronously without blocking the web listener
         try {
             if (!config_1.default.database_url) {
                 throw new Error('DATABASE_URL is not configured in .env! Please check your environment variables.');
+            }
+            if (config_1.default.database_url.includes('<username>')) {
+                throw new Error('DATABASE_URL still contains placeholder "<username>" from .env.example! Please update your .env or GitHub Secret ENV_FILE.');
             }
             logger_1.logger.info(colors_1.default.cyan('Connecting to MongoDB database...'));
             yield mongoose_1.default.connect(config_1.default.database_url);
@@ -48,28 +69,14 @@ function main() {
             (0, cron_1.default)();
             // Recover billing sessions after restart
             yield billing_service_1.BillingService.recoverBilling();
-            const port = typeof config_1.default.port === 'number'
-                ? config_1.default.port
-                : Number(config_1.default.port) || 5000;
-            const ip = config_1.default.ip_address || '0.0.0.0';
-            server = app_1.default.listen(port, ip, () => {
-                logger_1.logger.info(colors_1.default.yellow(`♻️  Application listening on port:${port} (host: ${ip})`));
-            });
-            //socket
-            const io = new socket_io_1.Server(server, {
-                pingTimeout: 60000,
-                cors: cors_1.corsOptions,
-            });
-            socketHelper_1.socketHelper.socket(io);
-            //@ts-ignore
-            global.io = io;
         }
         catch (error) {
-            logger_1.errorLogger.error(colors_1.default.red('🤢 Failed to connect Database:'), (error === null || error === void 0 ? void 0 : error.message) || error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            logger_1.errorLogger.error(colors_1.default.red(`🤢 Failed to connect Database: ${errorMsg}`));
+            console.error('DATABASE_CONNECTION_ERROR:', error);
             if ((error === null || error === void 0 ? void 0 : error.name) === 'MongooseServerSelectionError') {
                 logger_1.errorLogger.error(colors_1.default.yellow('👉 TIP: MongoDB Atlas connection timed out (30s). Please ensure your EC2 IP is whitelisted in MongoDB Atlas Network Access (or set 0.0.0.0/0).'));
             }
-            process_1.default.exit(1);
         }
         //handle unhandleRejection
         process_1.default.on('unhandledRejection', error => {

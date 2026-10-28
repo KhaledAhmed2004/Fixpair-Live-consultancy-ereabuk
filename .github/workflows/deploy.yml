@@ -139,7 +139,7 @@ jobs:
               sudo systemctl restart nginx
             fi
 
-            # 5.1 Auto-fix legacy port 5001 to 5000 in existing Nginx config
+            # 5.1 Auto-fix any legacy port 5001 to 5000 in existing Nginx config
             if grep -rn "127.0.0.1:5001" /etc/nginx/sites-available/ /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null; then
               echo "--> Found legacy upstream port 5001 in Nginx config. Updating to port 5000..."
               sudo sed -i 's/127\.0\.0\.1:5001/127.0.0.1:5000/g' /etc/nginx/sites-available/* 2>/dev/null || true
@@ -191,6 +191,11 @@ jobs:
                 sed -i 's/^IP_ADDRESS=.*/IP_ADDRESS=0.0.0.0/' .env
               else
                 echo "IP_ADDRESS=0.0.0.0" >> .env
+              fi
+
+              if grep -q "<username>" .env || grep -q "cluster.mongodb.net" .env; then
+                echo "⚠️ WARNING: .env appears to have placeholder database URL (<username>@cluster.mongodb.net)!"
+                echo "Please update GitHub Secret 'ENV_FILE' with your actual MongoDB Atlas connection string."
               fi
             fi
 

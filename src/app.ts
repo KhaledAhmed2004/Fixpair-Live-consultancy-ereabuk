@@ -2,6 +2,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import express, { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
+import mongoose from 'mongoose';
 import globalErrorHandler from './app/middlewares/globalErrorHandler';
 import router from './routes';
 import { Morgan } from './shared/morgen';
@@ -30,9 +31,17 @@ app.use('/api/v1', router);
 //live response
 app.get('/', (req: Request, res: Response) => {
   const date = new Date(Date.now());
+  const dbStatus =
+    mongoose.connection.readyState === 1
+      ? '🟢 Connected'
+      : mongoose.connection.readyState === 2
+        ? '🟡 Connecting...'
+        : '🔴 Disconnected';
+
   res.send(
     `<h1 style="text-align:center; color:#173616; font-family:Verdana;">Beep-beep! The server is alive and kicking.</h1>
-    <p style="text-align:center; color:#173616; font-family:Verdana;">${date}</p>
+    <p style="text-align:center; color:#173616; font-family:Verdana;">Database Status: <strong>${dbStatus}</strong></p>
+    <p style="text-align:center; color:#555; font-family:Verdana; font-size: 13px;">${date}</p>
     `,
   );
 });

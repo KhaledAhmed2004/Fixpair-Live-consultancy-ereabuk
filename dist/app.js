@@ -7,6 +7,7 @@ const cors_1 = __importDefault(require("cors"));
 const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const express_1 = __importDefault(require("express"));
 const http_status_codes_1 = require("http-status-codes");
+const mongoose_1 = __importDefault(require("mongoose"));
 const globalErrorHandler_1 = __importDefault(require("./app/middlewares/globalErrorHandler"));
 const routes_1 = __importDefault(require("./routes"));
 const morgen_1 = require("./shared/morgen");
@@ -30,8 +31,14 @@ app.use('/api/v1', routes_1.default);
 //live response
 app.get('/', (req, res) => {
     const date = new Date(Date.now());
+    const dbStatus = mongoose_1.default.connection.readyState === 1
+        ? '🟢 Connected'
+        : mongoose_1.default.connection.readyState === 2
+            ? '🟡 Connecting...'
+            : '🔴 Disconnected';
     res.send(`<h1 style="text-align:center; color:#173616; font-family:Verdana;">Beep-beep! The server is alive and kicking.</h1>
-    <p style="text-align:center; color:#173616; font-family:Verdana;">${date}</p>
+    <p style="text-align:center; color:#173616; font-family:Verdana;">Database Status: <strong>${dbStatus}</strong></p>
+    <p style="text-align:center; color:#555; font-family:Verdana; font-size: 13px;">${date}</p>
     `);
 });
 //global error handle

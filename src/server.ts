@@ -22,10 +22,40 @@ process.on('uncaughtException', error => {
 
 let server: any;
 async function main() {
+  const port =
+    typeof config.port === 'number'
+      ? config.port
+      : Number(config.port) || 5000;
+  const ip = config.ip_address || '0.0.0.0';
+
+  // 1. Immediately start HTTP Server so port 5000 is open,
+  // health checks pass, Nginx proxy functions, and CORS preflights are handled.
+  server = app.listen(port, ip, () => {
+    logger.info(
+      colors.yellow(`♻️  Application listening on port:${port} (host: ${ip})`),
+    );
+  });
+
+  // 2. Initialize Socket.IO
+  const io = new Server(server, {
+    pingTimeout: 60000,
+    cors: corsOptions,
+  });
+  socketHelper.socket(io);
+  //@ts-ignore
+  global.io = io;
+
+  // 3. Connect to Database asynchronously without blocking the web listener
   try {
     if (!config.database_url) {
       throw new Error(
         'DATABASE_URL is not configured in .env! Please check your environment variables.',
+      );
+    }
+
+    if (config.database_url.includes('<username>')) {
+      throw new Error(
+        'DATABASE_URL still contains placeholder "<username>" from .env.example! Please update your .env or GitHub Secret ENV_FILE.',
       );
     }
 
@@ -41,32 +71,10 @@ async function main() {
 
     // Recover billing sessions after restart
     await BillingService.recoverBilling();
-
-    const port =
-      typeof config.port === 'number'
-        ? config.port
-        : Number(config.port) || 5000;
-    const ip = config.ip_address || '0.0.0.0';
-
-    server = app.listen(port, ip, () => {
-      logger.info(
-        colors.yellow(`♻️  Application listening on port:${port} (host: ${ip})`),
-      );
-    });
-
-    //socket
-    const io = new Server(server, {
-      pingTimeout: 60000,
-      cors: corsOptions,
-    });
-    socketHelper.socket(io);
-    //@ts-ignore
-    global.io = io;
   } catch (error: any) {
-    errorLogger.error(
-      colors.red('🤢 Failed to connect Database:'),
-      error?.message || error,
-    );
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    errorLogger.error(colors.red(`🤢 Failed to connect Database: ${errorMsg}`));
+    console.error('DATABASE_CONNECTION_ERROR:', error);
     if (error?.name === 'MongooseServerSelectionError') {
       errorLogger.error(
         colors.yellow(
@@ -74,7 +82,6 @@ async function main() {
         ),
       );
     }
-    process.exit(1);
   }
 
   //handle unhandleRejection
