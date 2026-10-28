@@ -10,21 +10,14 @@ const http_status_codes_1 = require("http-status-codes");
 const globalErrorHandler_1 = __importDefault(require("./app/middlewares/globalErrorHandler"));
 const routes_1 = __importDefault(require("./routes"));
 const morgen_1 = require("./shared/morgen");
+const cors_2 = require("./config/cors");
 const app = (0, express_1.default)();
 //morgan
 app.use(morgen_1.Morgan.successHandler);
 app.use(morgen_1.Morgan.errorHandler);
+// Handle CORS (including OPTIONS preflight) before parsers and routes.
+app.use((0, cors_1.default)(cors_2.corsOptions));
 //body parser
-app.use((0, cors_1.default)({
-    origin: [
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'http://localhost:3002',
-        'https://ereabook-updated-work.vercel.app',
-        'https://www.ereabook-updated-work.vercel.app',
-    ],
-    credentials: true,
-}));
 app.use((0, cookie_parser_1.default)());
 app.use(express_1.default.json({ limit: '1gb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '1gb' }));

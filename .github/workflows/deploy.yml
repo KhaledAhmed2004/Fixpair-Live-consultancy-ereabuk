@@ -139,6 +139,14 @@ jobs:
               sudo systemctl restart nginx
             fi
 
+            # 5.1 Auto-fix legacy port 5001 to 5000 in existing Nginx config
+            if grep -rn "127.0.0.1:5001" /etc/nginx/sites-available/ /etc/nginx/sites-enabled/ /etc/nginx/conf.d/ 2>/dev/null; then
+              echo "--> Found legacy upstream port 5001 in Nginx config. Updating to port 5000..."
+              sudo sed -i 's/127\.0\.0\.1:5001/127.0.0.1:5000/g' /etc/nginx/sites-available/* 2>/dev/null || true
+              sudo sed -i 's/127\.0\.0\.1:5001/127.0.0.1:5000/g' /etc/nginx/conf.d/* 2>/dev/null || true
+              sudo nginx -t && sudo systemctl reload nginx
+            fi
+
             # 6. Auto-issue SSL (HTTPS) via Certbot
             if [ ! -d /etc/letsencrypt/live/api.getfixpair.com ] && [ ! -d /etc/letsencrypt/live/dashboard.getfixpair.com ]; then
               echo "--> Setting up free SSL certificates for api.getfixpair.com and dashboard.getfixpair.com..."
@@ -172,6 +180,20 @@ jobs:
               fi
             fi
 
+            # Enforce PORT=5000 and IP_ADDRESS=0.0.0.0 in .env
+            if [ -f .env ]; then
+              if grep -q "^PORT=" .env; then
+                sed -i 's/^PORT=.*/PORT=5000/' .env
+              else
+                echo "PORT=5000" >> .env
+              fi
+              if grep -q "^IP_ADDRESS=" .env; then
+                sed -i 's/^IP_ADDRESS=.*/IP_ADDRESS=0.0.0.0/' .env
+              else
+                echo "IP_ADDRESS=0.0.0.0" >> .env
+              fi
+            fi
+
             # Ensure upload directories exist
             mkdir -p uploads public
 
@@ -193,9 +215,14 @@ jobs:
 
             # PM2 accepting a reload does not mean the API is ready.
             deployment_diagnostics() {
+              echo "==================== PM2 STATUS ===================="
               pm2 status || true
+              echo "==================== PM2 LOGS (fixpair-backend) ===================="
               pm2 logs fixpair-backend --lines 80 --nostream || true
+              echo "==================== NGINX ERROR LOGS ===================="
               sudo tail -n 40 /var/log/nginx/error.log || true
+              echo "==================== PORT 5000 LISTENER CHECK ===================="
+              sudo ss -tulpn | grep 5000 || true
             }
 
             echo "--> Waiting for backend on Nginx upstream port 5000..."

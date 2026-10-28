@@ -20,6 +20,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const socket_io_1 = require("socket.io");
 const app_1 = __importDefault(require("./app"));
 const config_1 = __importDefault(require("./config"));
+const cors_1 = require("./config/cors");
 const seedAdmin_1 = require("./DB/seedAdmin");
 const socketHelper_1 = require("./helpers/socketHelper");
 const logger_1 = require("./shared/logger");
@@ -35,6 +36,10 @@ let server;
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
+            if (!config_1.default.database_url) {
+                throw new Error('DATABASE_URL is not configured in .env! Please check your environment variables.');
+            }
+            logger_1.logger.info(colors_1.default.cyan('Connecting to MongoDB database...'));
             yield mongoose_1.default.connect(config_1.default.database_url);
             logger_1.logger.info(colors_1.default.green('🚀 Database connected successfully'));
             //Seed Super Admin after database connection is successful
@@ -43,30 +48,28 @@ function main() {
             (0, cron_1.default)();
             // Recover billing sessions after restart
             yield billing_service_1.BillingService.recoverBilling();
-            const port = typeof config_1.default.port === 'number' ? config_1.default.port : Number(config_1.default.port);
-            server = app_1.default.listen(port, config_1.default.ip_address, () => {
-                logger_1.logger.info(colors_1.default.yellow(`♻️  Application listening on port:${config_1.default.port}`));
+            const port = typeof config_1.default.port === 'number'
+                ? config_1.default.port
+                : Number(config_1.default.port) || 5000;
+            const ip = config_1.default.ip_address || '0.0.0.0';
+            server = app_1.default.listen(port, ip, () => {
+                logger_1.logger.info(colors_1.default.yellow(`♻️  Application listening on port:${port} (host: ${ip})`));
             });
             //socket
             const io = new socket_io_1.Server(server, {
                 pingTimeout: 60000,
-                cors: {
-                    origin: [
-                        'http://localhost:3000',
-                        'http://localhost:3001',
-                        'http://localhost:3002',
-                        'https://ereabook-updated-work.vercel.app',
-                        'https://www.ereabook-updated-work.vercel.app',
-                    ],
-                    credentials: true,
-                },
+                cors: cors_1.corsOptions,
             });
             socketHelper_1.socketHelper.socket(io);
             //@ts-ignore
             global.io = io;
         }
         catch (error) {
-            logger_1.errorLogger.error(colors_1.default.red('🤢 Failed to connect Database'));
+            logger_1.errorLogger.error(colors_1.default.red('🤢 Failed to connect Database:'), (error === null || error === void 0 ? void 0 : error.message) || error);
+            if ((error === null || error === void 0 ? void 0 : error.name) === 'MongooseServerSelectionError') {
+                logger_1.errorLogger.error(colors_1.default.yellow('👉 TIP: MongoDB Atlas connection timed out (30s). Please ensure your EC2 IP is whitelisted in MongoDB Atlas Network Access (or set 0.0.0.0/0).'));
+            }
+            process_1.default.exit(1);
         }
         //handle unhandleRejection
         process_1.default.on('unhandledRejection', error => {

@@ -23,6 +23,13 @@ process.on('uncaughtException', error => {
 let server: any;
 async function main() {
   try {
+    if (!config.database_url) {
+      throw new Error(
+        'DATABASE_URL is not configured in .env! Please check your environment variables.',
+      );
+    }
+
+    logger.info(colors.cyan('Connecting to MongoDB database...'));
     await mongoose.connect(config.database_url as string);
     logger.info(colors.green('🚀 Database connected successfully'));
 
@@ -36,11 +43,14 @@ async function main() {
     await BillingService.recoverBilling();
 
     const port =
-      typeof config.port === 'number' ? config.port : Number(config.port);
+      typeof config.port === 'number'
+        ? config.port
+        : Number(config.port) || 5000;
+    const ip = config.ip_address || '0.0.0.0';
 
-    server = app.listen(port, config.ip_address as string, () => {
+    server = app.listen(port, ip, () => {
       logger.info(
-        colors.yellow(`♻️  Application listening on port:${config.port}`),
+        colors.yellow(`♻️  Application listening on port:${port} (host: ${ip})`),
       );
     });
 
@@ -52,8 +62,19 @@ async function main() {
     socketHelper.socket(io);
     //@ts-ignore
     global.io = io;
-  } catch (error) {
-    errorLogger.error(colors.red('🤢 Failed to connect Database'));
+  } catch (error: any) {
+    errorLogger.error(
+      colors.red('🤢 Failed to connect Database:'),
+      error?.message || error,
+    );
+    if (error?.name === 'MongooseServerSelectionError') {
+      errorLogger.error(
+        colors.yellow(
+          '👉 TIP: MongoDB Atlas connection timed out (30s). Please ensure your EC2 IP is whitelisted in MongoDB Atlas Network Access (or set 0.0.0.0/0).',
+        ),
+      );
+    }
+    process.exit(1);
   }
 
   //handle unhandleRejection
