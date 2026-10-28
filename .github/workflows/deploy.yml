@@ -184,11 +184,51 @@ jobs:
             echo "--> Managing PM2 Process..."
             if pm2 describe fixpair-backend > /dev/null 2>&1; then
               echo "Reloading existing PM2 process..."
-              pm2 reload ecosystem.config.js
+              pm2 reload ecosystem.config.js --update-env
             else
               echo "Starting PM2 process for the first time..."
               pm2 start ecosystem.config.js
             fi
             pm2 save
+
+            # PM2 accepting a reload does not mean the API is ready.
+            deployment_diagnostics() {
+              pm2 status || true
+              pm2 logs fixpair-backend --lines 80 --nostream || true
+              sudo tail -n 40 /var/log/nginx/error.log || true
+            }
+
+            echo "--> Waiting for backend on Nginx upstream port 5000..."
+            backend_ready=false
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error --max-time 3 http://127.0.0.1:5000/ > /dev/null; then
+                backend_ready=true
+                break
+              fi
+              sleep 2
+            done
+            if [ "$backend_ready" != true ]; then
+              echo "ERROR: Backend did not become ready on port 5000. Check startup logs and PORT/IP_ADDRESS configuration."
+              deployment_diagnostics
+              exit 1
+            fi
+
+            echo "--> Checking public HTTPS login preflight through Nginx..."
+            preflight_headers=$(mktemp)
+            if ! curl --fail --silent --show-error --max-time 15 \
+              --dump-header "$preflight_headers" --output /dev/null \
+              --request OPTIONS https://api.getfixpair.com/api/v1/auth/login \
+              --header 'Origin: https://dashboard.getfixpair.com' \
+              --header 'Access-Control-Request-Method: POST' \
+              --header 'Access-Control-Request-Headers: content-type' || \
+              ! tr -d '\r' < "$preflight_headers" | grep -iq '^access-control-allow-origin: https://dashboard\.getfixpair\.com$' || \
+              ! tr -d '\r' < "$preflight_headers" | grep -iq '^access-control-allow-credentials: true$'; then
+              echo "ERROR: Public login preflight failed."
+              cat "$preflight_headers"
+              rm -f "$preflight_headers"
+              deployment_diagnostics
+              exit 1
+            fi
+            rm -f "$preflight_headers"
 
             echo "--> Deployment finished successfully!"
