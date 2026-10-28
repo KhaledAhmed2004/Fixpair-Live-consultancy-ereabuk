@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 import { Server } from 'socket.io';
 import app from './app';
 import config from './config';
+import { corsOptions } from './config/cors';
 import { seedSuperAdmin } from './DB/seedAdmin';
 import { socketHelper } from './helpers/socketHelper';
 import { errorLogger, logger } from './shared/logger';
@@ -46,16 +47,7 @@ async function main() {
     //socket
     const io = new Server(server, {
       pingTimeout: 60000,
-      cors: {
-        origin: [
-          'http://localhost:3000',
-          'http://localhost:3001',
-          'http://localhost:3002',
-          'https://ereabook-updated-work.vercel.app',
-          'https://www.ereabook-updated-work.vercel.app',
-        ],
-        credentials: true,
-      },
+      cors: corsOptions,
     });
     socketHelper.socket(io);
     //@ts-ignore

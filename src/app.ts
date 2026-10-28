@@ -5,25 +5,16 @@ import { StatusCodes } from 'http-status-codes';
 import globalErrorHandler from './app/middlewares/globalErrorHandler';
 import router from './routes';
 import { Morgan } from './shared/morgen';
+import { corsOptions } from './config/cors';
 const app = express();
 
 //morgan
 app.use(Morgan.successHandler);
 app.use(Morgan.errorHandler);
 
+// Handle CORS (including OPTIONS preflight) before parsers and routes.
+app.use(cors(corsOptions));
 //body parser
-app.use(
-  cors({
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:3002',
-      'https://ereabook-updated-work.vercel.app',
-      'https://www.ereabook-updated-work.vercel.app',
-    ],
-    credentials: true,
-  })
-);
 app.use(cookieParser());
 app.use(express.json({ limit: '1gb' }));
 app.use(express.urlencoded({ extended: true, limit: '1gb' }));
