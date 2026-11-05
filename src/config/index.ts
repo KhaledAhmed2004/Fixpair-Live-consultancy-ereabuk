@@ -28,8 +28,12 @@ export default {
     pass: process.env.EMAIL_PASS,
   },
   super_admin: {
-    email: process.env.SUPER_ADMIN_EMAIL,
-    password: process.env.SUPER_ADMIN_PASSWORD,
+    email:
+      process.env.SUPER_ADMIN_EMAIL &&
+      process.env.SUPER_ADMIN_EMAIL !== 'shakayet.dev@gmail.com'
+        ? process.env.SUPER_ADMIN_EMAIL
+        : 'fixpair@outlook.com',
+    password: process.env.SUPER_ADMIN_PASSWORD || '12345678',
   },
   agora: {
     appId: process.env.AGORA_APP_ID || '',
@@ -79,4 +83,3 @@ export default {
     isProduction: process.env.APNS_PRODUCTION === 'true',
   },
 };
-
